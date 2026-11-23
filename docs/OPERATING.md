@@ -1590,7 +1590,13 @@ mounted only when a Matrix bridge is configured: `POST /public/bridge/superpipel
 (`work.available`, below), `POST /public/bridge/superpipeline/push` (gates, questions and the rest,
 below) and `POST /public/bridge/superpipeline/events` (the event relay, below). The first two are
 signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_SECRET`; each answers
-503 when its secret is unset. A hub with the bridge off claims nothing. See
+503 when its secret is unset. All three verify `x-treaty-signature` (timestamp, `ce-id` and body, a
+300 s window). The first two still accept a board's older `X-Superpipeline-Signature` (body only), but
+only when no `x-treaty-signature` is sent; `push rejected: bad x-treaty-signature` in the log is a
+delivery whose new signature failed. All three answer by the suite's receiver status contract:
+2xx handled or permanently ignored (an event this hub does not take, a board whose chat has moved);
+**503** for a board this hub has not mapped to a tenant yet, so the board and the relay retry rather
+than drop it; **400** for a body that is not the event it names (treaty's guard refuses it). A hub with the bridge off claims nothing. See
 [DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the two variables
 and the roster table behind them.
 
@@ -1782,17 +1788,26 @@ journalctl -u agentpod-hub | grep 'claim loops woken'                         # 
 ```
 
 **A third door, the suite's event relay.** A SuperPipeline deployment with `RELAY_URL` and
-`RELAY_TOKEN` also publishes each `gate.pending` to the relay (NATS JetStream), which delivers it to
-`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/events`, signed with
-`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`), as a CloudEvent of type
-`com.superjackfruit.superpipeline.gate.pending.v1`. Without the secret the route answers 503. It
-hands the gate to the same projection as the push, idempotent on the gate id, so a gate that arrives
-by both doors is posted once. **With the secret set, the relay is the only door for gates:** the
-hub's push subscription leaves `gate.pending` out (it logs `gates reach chat through the event relay;
-the push subscription leaves gate.pending out` at start), and every other event still comes by push.
-SuperPipeline replaces a board's config on each sweep's registration, so the change reaches every
-board within five minutes of a restart. If the relay is down, gates wait for the sweep (≤ 5 min). A
-hub with no relay secret keeps getting gates by push. The log says which door posted a gate:
+`RELAY_TOKEN` also publishes its events to the relay (NATS JetStream), which delivers those this hub
+subscribes to at `$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/events`, signed with
+`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`), as CloudEvents of type
+`com.superjackfruit.superpipeline.<event>.v1` (a gate is `com.superjackfruit.superpipeline.gate.pending.v1`). Without the secret the route answers 503. It takes
+all eleven decision events (the `PUSH_EVENTS` list above) and hands each to the same handler as the
+push, after treaty's guard for that event; any other type is answered 200 and ignored. **An event
+that arrives by both doors is acted on once.** Both carry one id per event, `<boardId>:<event seq>`
+(`ce-id`), and the first door to claim it in `superpipeline_event_receipts` acts; the second answers
+200 `{"status":"duplicate"}` and logs `decision already handled through the other door`. A failed
+attempt gives its claim back, so the retry is acted on. Each handler is also idempotent on its own
+key (the gate, the question, the notice), which covers a board that predates the shared id. An id
+is believed on the push only when `x-treaty-signature` vouched for it. **With the secret set, the
+relay is the only door for gates:** the hub's push subscription leaves `gate.pending` out (it logs
+`gates reach chat through the event relay; the push subscription leaves gate.pending out` at start).
+The other ten stay on the push subscription as well as the relay, so turning the relay on or off,
+or narrowing its filter, never leaves a decision without a door; the push drops them in a later
+change, once every deployment's relay carries them. SuperPipeline replaces a board's config on each
+sweep's registration, so a change reaches every board within five minutes of a restart. If the
+relay is down, gates wait for the sweep (≤ 5 min). A hub with no relay secret keeps getting gates by
+push. The log says which door posted a gate or a question:
 
 ```bash
 journalctl -u agentpod-hub | grep 'gate projected' | grep -o 'via[^,}]*'   # push or event-relay

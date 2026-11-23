@@ -103,7 +103,7 @@ import { registerEnabledProvisioners } from './services/provisioner/index.ts';
 import { enabledProviders } from './services/provisioner/index.ts';
 import { startNodeSweeper } from './services/sweeper/index.ts';
 import { installStageProfilesAtStartup, startSuperpipelineBridge } from './services/bridge/index.ts';
-import { isBridgeEnabled, loadBridgeConfig, superpipelineRelayFromEnv } from './services/bridge/index.ts';
+import { createEventReceipts, isBridgeEnabled, loadBridgeConfig, superpipelineRelayFromEnv } from './services/bridge/index.ts';
 import { createGracefulShutdown } from './services/hub/index.ts';
 import { httpServerSpans } from './telemetry/http-middleware.ts';
 import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
@@ -424,26 +424,25 @@ if (matrixBridge) {
   // secret rather than a browser holding a session — and /api/* carries the
   // CSRF middleware, which passes Bearer and would reject an HMAC-signed body.
   // `runtime-callback.ts` is already mounted here for the same reason.
+  // One decision handler behind both doors, and one record of the event ids it has acted on, so a
+  // decision the push and the event relay both deliver is acted on once (treaty phase 2).
+  const decisionDeps = {
+    tenantIdFor: tenantForBoard,
+    ...gateProjection,
+    approvalRequestAllowed: async (tenantId: string, boardId: string) =>
+      superpipelineRelay ? (await relayTokenForBoard(superpipelineRelay, tenantId, boardId)) !== null : false,
+    receipts: createEventReceipts(),
+  };
   app.route(
     '/public',
-    createSuperpipelinePushRoutes({
-      secret: process.env.SUPERPIPELINE_PUSH_SECRET,
-      tenantIdFor: tenantForBoard,
-      ...gateProjection,
-      approvalRequestAllowed: async (tenantId, boardId) =>
-        superpipelineRelay ? (await relayTokenForBoard(superpipelineRelay, tenantId, boardId)) !== null : false,
-    }),
+    createSuperpipelinePushRoutes({ secret: process.env.SUPERPIPELINE_PUSH_SECRET, ...decisionDeps }),
   );
 
-  // POST /public/bridge/superpipeline/events — the same gates through the suite's event relay
-  // (treaty plan step 7), signed by the relay. Off (503) without TREATY_RELAY_DELIVERY_SECRET.
+  // POST /public/bridge/superpipeline/events — the eleven decision events through the suite's event
+  // relay, signed by the relay. Off (503) without TREATY_RELAY_DELIVERY_SECRET.
   app.route(
     '/public',
-    createSuperpipelineEventsRoutes({
-      secret: process.env.TREATY_RELAY_DELIVERY_SECRET,
-      tenantIdFor: tenantForBoard,
-      ...gateProjection,
-    }),
+    createSuperpipelineEventsRoutes({ secret: process.env.TREATY_RELAY_DELIVERY_SECRET, ...decisionDeps }),
   );
 
   // …and the floor beneath it. superpipeline retries a push five times and then

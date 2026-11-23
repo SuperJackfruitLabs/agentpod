@@ -18,6 +18,8 @@ require (
 	golang.org/x/crypto v0.58.0
 )
 
+require github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

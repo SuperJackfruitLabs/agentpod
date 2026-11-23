@@ -11,7 +11,6 @@ export { relayTokenForBoard } from "./relay-scope";
 export { handleDecisionTimeout, repostEscalationsOnJoin, retryEscalationReposts } from "./decision-notices";
 export type { DecisionNoticeDeps, DecisionNoticeOutcome } from "./decision-notices";
 export { projectDelivery } from "./delivery-projection";
-export { isElicitationPending } from "./elicitation-card";
 export { startElicitationSweeper } from "./elicitation-sweep";
 export { postedElicitationsAwaitingOutcome, projectElicitation } from "./elicitations";
 export { reconcileBoardGates } from "./fleet-gates";

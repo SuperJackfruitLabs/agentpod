@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/matrix/dev.agentpod.thought.delta.json",
+  "title": "dev.agentpod.thought.delta",
+  "description": "One delta of a turn's reasoning, sent to the reader's own devices as a to-device event while the turn runs: never stored in a room. Delivery is at-least-once and unordered, so `text` is everything so far and `seq` orders it; a reader applies the highest seq it has seen for the turn. Carries no version: it changes only additively. Pacing is AgentPod's. Mirrors AgentPod's `LiveThoughtDelta` (`packages/contract/src/matrix-events.ts`): the same body as dev.agentpod.stream.delta under a different type, so a reader can tell thinking from the answer. Reasoning never reaches a room. Readers ignore properties they do not know.",
+  "x-treaty-carrier": {
+    "kind": "to-device"
+  },
+  "type": "object",
+  "required": ["room_id", "session_id", "seq", "text", "done"],
+  "properties": {
+    "room_id": {
+      "type": "string",
+      "description": "The room the turn is answering in."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "A turn-scoped id: a new value starts a new turn. The AgentPod hub sends the ACP session id of the turn it is streaming; the Hermes plugin sends the turn's own id (falling back to Hermes's session id), so a straggler from an earlier turn is never mistaken for this one."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic within a turn. A reader drops anything older than what it has."
+    },
+    "text": {
+      "type": "string",
+      "description": "Everything so far this turn, never the increment."
+    },
+    "done": {
+      "type": "boolean",
+      "description": "True on the last delta of a turn."
+    }
+  }
+}

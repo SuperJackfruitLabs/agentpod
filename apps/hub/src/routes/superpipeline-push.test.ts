@@ -111,15 +111,16 @@ describe("the signed push receiver", () => {
   test("refuses a gate.pending with no gate id", async () => {
     const raw = JSON.stringify({ ...DELIVERY, gateId: "" });
     const res = await post(deps(), raw, await sign(SECRET, raw));
-    expect(await res.json()).toMatchObject({ ignored: true });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid body" });
   });
 
-  test("refuses a board mapped to no fleet", async () => {
+  test("refuses a board mapped to no fleet, for now: 503, so the board tries again", async () => {
     // The correct refusal. A default would project one tenant's approval into
-    // another's room.
+    // another's room. Transient (ruling 4): a board added to the roster later is mapped then.
     const raw = JSON.stringify(DELIVERY);
     const res = await post(deps({ tenantIdFor: async () => null }), raw, await sign(SECRET, raw));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(503);
   });
 });
 
@@ -180,14 +181,14 @@ test("an unsigned elicitation is refused, exactly as a gate is", async () => {
   expect(res.status).toBe(401);
 });
 
-test("an elicitation for a board this hub does not know is 404, not a crash", async () => {
+test("an elicitation for a board this hub does not know is 503, not a crash", async () => {
   const d = deps({ tenantIdFor: async () => null });
   const raw = JSON.stringify(ELICITATION);
   const res = await post(d, raw, await sign(SECRET, raw));
-  expect(res.status).toBe(404);
+  expect(res.status).toBe(503);
 });
 
-test("an elicitation missing the id an answer is addressed to is ignored, not projected", async () => {
+test("an elicitation missing the id an answer is addressed to is refused, not projected", async () => {
   // The predicate's whole job: a board a version ahead or behind must not have this
   // hub posting a question nobody can answer, which reads like a button that does
   // nothing.
@@ -198,8 +199,7 @@ test("an elicitation missing the id an answer is addressed to is ignored, not pr
 
   const res = await post(d, raw, await sign(SECRET, raw));
 
-  expect(res.status).toBe(200);
-  expect(await res.json()).toMatchObject({ ignored: true });
+  expect(res.status).toBe(400);
   expect(said).toHaveLength(0);
 });
 
@@ -254,16 +254,16 @@ test("a signed delivery.pending is routed to the delivery projection", async () 
   expect(askedFor).toEqual([FOLLOW_UP.boardId]);
 });
 
-test("a delivery.pending for a board this hub does not know is 404", async () => {
+test("a delivery.pending for a board this hub does not know is 503", async () => {
   const raw = JSON.stringify(FOLLOW_UP);
   const res = await post(deps({ tenantIdFor: async () => null }), raw, await sign(SECRET, raw));
-  expect(res.status).toBe(404);
+  expect(res.status).toBe(503);
 });
 
-test("a delivery.pending with no gate id is ignored, not projected", async () => {
+test("a delivery.pending with no gate id is refused, not projected", async () => {
   const raw = JSON.stringify({ ...FOLLOW_UP, gateId: "" });
   const res = await post(deps(), raw, await sign(SECRET, raw));
-  expect(await res.json()).toMatchObject({ ignored: true });
+  expect(res.status).toBe(400);
 });
 
 /** A card waiting on a person (charter: "Waiting cards and broker approvals reach chat" §1), through the same signed door. */
@@ -300,11 +300,11 @@ test("a signed attention.pending is routed to the attention projection", async (
   expect(askedFor).toEqual([WAITING.boardId]);
 });
 
-test("an attention.pending for a board this hub does not know is 404; one with no wait id is ignored", async () => {
+test("an attention.pending for a board this hub does not know is 503; one with no wait id is refused", async () => {
   const raw = JSON.stringify(WAITING);
-  expect((await post(deps({ tenantIdFor: async () => null }), raw, await sign(SECRET, raw))).status).toBe(404);
+  expect((await post(deps({ tenantIdFor: async () => null }), raw, await sign(SECRET, raw))).status).toBe(503);
   const noWait = JSON.stringify({ ...WAITING, waitId: "" });
-  expect(await (await post(deps(), noWait, await sign(SECRET, noWait))).json()).toMatchObject({ ignored: true });
+  expect((await post(deps(), noWait, await sign(SECRET, noWait))).status).toBe(400);
 });
 
 /** A SuperToolkit approval request (charter: waiting cards and broker approvals reach chat §3). */
@@ -379,7 +379,7 @@ describe("a decision that passed its stage's timeout", () => {
     expect(handled).toEqual([ESCALATED]);
   });
 
-  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+  test("one this hub cannot read is refused 400 and goes nowhere (ruling 4: a retry sends the same bytes)", async () => {
     const handled: unknown[] = [];
     const d = deps({
       handleDecisionTimeout: async (body) => {
@@ -389,8 +389,8 @@ describe("a decision that passed its stage's timeout", () => {
     });
     const raw = JSON.stringify({ ...ESCALATED, decisionKind: "vote" });
     const res = await post(d, raw, await sign(SECRET, raw));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, ignored: true });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid body" });
     expect(handled).toHaveLength(0);
   });
 });
@@ -420,7 +420,7 @@ describe("an approval on a quorum gate short of its quorum", () => {
     expect(handled).toEqual([RECORDED]);
   });
 
-  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+  test("one this hub cannot read is refused 400 and goes nowhere (ruling 4: a retry sends the same bytes)", async () => {
     const handled: unknown[] = [];
     const d = deps({
       handleGateApprovalRecorded: async (body) => {
@@ -436,8 +436,8 @@ describe("an approval on a quorum gate short of its quorum", () => {
     ]) {
       const raw = JSON.stringify(bad);
       const res = await post(d, raw, await sign(SECRET, raw));
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, ignored: true });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid body" });
     }
     expect(handled).toHaveLength(0);
   });
@@ -490,7 +490,7 @@ describe("a held approval released or pulled back", () => {
     expect(pulled).toEqual([PULLED]);
   });
 
-  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+  test("one this hub cannot read is refused 400 and goes nowhere (ruling 4: a retry sends the same bytes)", async () => {
     const handled: unknown[] = [];
     const d = deps({
       handleDecisionReleased: async (body) => {
@@ -511,8 +511,8 @@ describe("a held approval released or pulled back", () => {
     ]) {
       const raw = JSON.stringify(bad);
       const res = await post(d, raw, await sign(SECRET, raw));
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, ignored: true });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid body" });
     }
     expect(handled).toHaveLength(0);
   });
@@ -569,7 +569,7 @@ describe("a machine check failed or overridden", () => {
     expect(overridden).toEqual([OVERRIDDEN]);
   });
 
-  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+  test("one this hub cannot read is refused 400 and goes nowhere (ruling 4: a retry sends the same bytes)", async () => {
     const handled: unknown[] = [];
     const d = deps({
       handleCheckFailed: async (body) => {
@@ -595,8 +595,8 @@ describe("a machine check failed or overridden", () => {
     ]) {
       const raw = JSON.stringify(bad);
       const res = await post(d, raw, await sign(SECRET, raw));
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, ignored: true });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid body" });
     }
     expect(handled).toHaveLength(0);
   });
@@ -661,7 +661,7 @@ describe("a board whose chat has moved", () => {
     const raw = JSON.stringify(DELIVERY);
     const res = await post(d, raw, await sign(SECRET, raw));
     // Reached the projection's tenant lookup: this board is still the hub's.
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(503);
     expect(asked).toEqual(["brd_7c1f"]);
   });
 });

@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
 import { ElicitationRequestCard } from "@agentpod/contract";
+// The guard is treaty's since phase 2; these cases stay as what this hub relies on it to refuse.
+import { isElicitationPending } from "@superjackfruitlabs/treaty-matrix-events";
 
 import {
   elicitationProseBody,
   elicitationRequestCard,
-  isElicitationPending,
   type ElicitationPendingDelivery,
 } from "./elicitation-card";
 

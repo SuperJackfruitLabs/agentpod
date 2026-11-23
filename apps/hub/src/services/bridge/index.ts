@@ -26,7 +26,9 @@ export { namesItsBoard } from "./deliveries";
 export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-grant";
 export { attachExecutionReference } from "./execution-reference";
 export { startSuperpipelineBridge } from "./loop";
-export { subscribeBoardsToPush } from "./push-subscription";
+export { PUSH_EVENTS, subscribeBoardsToPush } from "./push-subscription";
+export { createEventReceipts } from "./event-receipts";
+export type { EventReceipts } from "./event-receipts";
 export { RELAY_CREDENTIAL_ENV, createSuperpipelineRelay, readRelayCredential, superpipelineRelayFromEnv } from "./relay";
 export type { SuperpipelineRelay } from "./relay";
 export {
