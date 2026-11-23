@@ -218,11 +218,12 @@ describe("every decision event through the relay", () => {
   }
 
   // These three have no test seam: a board mapped to no fleet stops them at the tenant, which only a
-  // handled decision asks for (an ignored type is answered before it).
+  // handled decision asks for (an ignored type is answered before it). The board is rostered here, so
+  // an unmapped one is 503 rather than ignored.
   for (const name of ["elicitation.pending", "delivery.pending", "attention.pending"]) {
     test(`${name} reaches its handler`, async () => {
       const asked: string[] = [];
-      const { d } = deps({ tenantIdFor: async (b) => (asked.push(b), null) });
+      const { d } = deps({ tenantIdFor: async (b) => (asked.push(b), null), tenantsForBoard: async () => ["tnt_rostered"] });
       const body = exampleOf(name);
       const res = await deliver(d, { data: body, type: decisionEventType(name), id: `brd_7c1f:${name}` });
       expect(res.status).not.toBe(200);
