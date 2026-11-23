@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.132 — 2026-11-23
+
 ### Added
 
 - A settled card's bench is reclaimed. Once the hub records a card's checkpoint
@@ -71,29 +73,42 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   node serves. It then prints the Accounts and SuperPipeline steps no verb takes and
   the stage's `checkpointPolicy`. It changes nothing and exits 1 on a failure.
 
-- Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
-  delivers the worker's task to the payload only as SuperBench finite stdin and
-  reads its framed result from sealed stdout, then reads the run's receipt back
-  and releases the lease. Lost replies recover through the receipt with the same
-  request ID; nothing is resent. Off unless both the coordinator registry flag
-  and the profile opt in. See `docs/BENCH_REGISTERED_LAUNCH.md`.
-- The coordinator wire can refuse with `capacity_exhausted`; the hub reports it
-  by name on the parked attempt and never re-sends prepare or execute.
-
-- The private bench worker has an explicit `hermes-v1` adapter for bounded prompt
-  input and binding-matched task results. It requires a separately prepared
-  payload-owned Hermes home, executable, provider and model. No dispatcher enables
-  it by default; installed access, provider readiness and the producer crossing
-  remain separate verification requirements.
+- The event relay is a door for all eleven SuperPipeline decision events, not only
+  `gate.pending`. An event that arrives by both the relay and the push is acted on
+  once, by its shared id `<boardId>:<seq>`, claimed in a new table
+  `superpipeline_event_receipts` (migration 0137, pruned after 7 days). The push
+  subscription is unchanged.
 
 ### Changed
 
+- Org-plane tokens are verified with treaty's `verifyAccessToken`: 30 s leeway on
+  `exp`, `nbf` and `iat`; a lifetime over 300 s, a token with no `kid`, a
+  `mayDispatch` that is not a prn, or an `ent` without the product is refused. An
+  unknown `kid` refetches keys at most once per 30 s. Accounts mints no token these
+  rules refuse.
+- The push doors verify the suite's `x-treaty-signature` (timestamp, event id and
+  body, 300 s window). The older `X-Superpipeline-Signature` is still accepted, only
+  when the new header is absent. The doors answer by the receiver status contract: a
+  board this hub has not mapped is 503 (was 404), a body that is not the event it
+  names is 400, an unknown type is 200 and ignored.
+- The hub's SuperPipeline client is held to treaty's `agent-work.v1` and
+  `decisions.v1`: responses are read with checks, a claim refusal carries its
+  `reason`, pending items with no board are skipped, and chat write-backs time out
+  after 10 s.
 - Treaty pins move to 0.0.17 (`treaty-contracts`, `-cloudevents`,
   `-ecosystem-identity`, `-matrix-events`). 0.0.16 added the proposed per-card
   repository contracts; 0.0.17 adds contracts for other products and changes none
   of the checkpoint or agent-work files.
 
 ### Fixed
+
+- Harness scratch no longer dirties a bench checkout: the registered worker adds
+  `/.hermes/cache/` to each bench member's own `info/exclude` before the harness
+  starts, so SuperBench no longer refuses the checkpoint as dirty. The tracked
+  `.gitignore` is not touched.
+- A card whose Hermes run failed on a model error says why, in a closed sentence
+  (for example HTTP 401 from the provider), carried by the node as `detail.task`.
+  The provider's own text is never copied.
 
 - The `fleet bench stage set|rm` reply field `repinned` is now
   `otherStagesRepinned`: it always named only the other stages on the node moved to
@@ -136,6 +151,32 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   board tools on ordinary cards. Upgrading a token row to a source keeps that token
   and drops only the claim token. A source row still refuses a claim token
   (`fleet bridge set KEY --mcp-token spa_…`). Migration 0134 relaxes the CHECK.
+
+## v0.1.131 — 2026-11-22
+
+No changelog entries were written for this release; its changes are listed in its
+release notes.
+
+## v0.1.130 — 2026-11-17
+
+### Added
+
+- Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
+  delivers the worker's task to the payload only as SuperBench finite stdin and
+  reads its framed result from sealed stdout, then reads the run's receipt back
+  and releases the lease. Lost replies recover through the receipt with the same
+  request ID; nothing is resent. Off unless both the coordinator registry flag
+  and the profile opt in. See `docs/BENCH_REGISTERED_LAUNCH.md`.
+- The coordinator wire can refuse with `capacity_exhausted`; the hub reports it
+  by name on the parked attempt and never re-sends prepare or execute.
+
+- The private bench worker has an explicit `hermes-v1` adapter for bounded prompt
+  input and binding-matched task results. It requires a separately prepared
+  payload-owned Hermes home, executable, provider and model. No dispatcher enables
+  it by default; installed access, provider readiness and the producer crossing
+  remain separate verification requirements.
+
+### Fixed
 
 - Recognize the proposed SuperBench logical-capacity refusal only for ordinary
   operations at HTTP 422, preserving its bounded diagnostic without redispatch.
