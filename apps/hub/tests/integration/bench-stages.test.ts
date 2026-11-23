@@ -358,35 +358,58 @@ describe("a stage set up from the hub", () => {
   test("a stage reclaims settled benches unless set to --keep-bench, and a re-pin keeps the choice", async () => {
     const List = z.object({ stages: z.array(BenchStageView) });
     const keep = async () => List.parse(await (await call("GET", "/stages")).json()).stages.find((st) => st.name === "review")?.keepBench;
+    // The reply's `changed` names the flip, as it names a pin: it answered `changed: {}`.
+    const Changed = z.object({ changed: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })) });
+    const set = async (name: string, body: Record<string, unknown>) => {
+      const res = await call("PATCH", `/stages/${name}`, body);
+      expect(res.status).toBe(200);
+      return Changed.parse(await res.json()).changed;
+    };
     expect(await keep()).toBe(false);
     expect(await keepFor(must(installedFor("review"), "review"))).toBe(false);
-    expect((await call("PATCH", "/stages/review", { keepBench: true })).status).toBe(200);
+    expect((await set("review", { keepBench: true })).keepBench).toEqual({ from: false, to: true });
     expect(await keep()).toBe(true);
     expect(await keepFor(must(installedFor("review"), "review"))).toBe(true);
     // Another stage's write re-pins this one and leaves its choice alone.
-    expect((await call("PATCH", "/stages/legacy", { refresh: true })).status).toBe(200);
+    expect(await set("legacy", { refresh: true })).not.toHaveProperty("keepBench");
     expect(await keep()).toBe(true);
-    expect((await call("PATCH", "/stages/review", { keepBench: false })).status).toBe(200);
+    expect((await set("review", { keepBench: false })).keepBench).toEqual({ from: true, to: false });
     expect(await keep()).toBe(false);
+    // Asked for what it already is, nothing flipped and nothing is claimed.
+    expect(await set("review", { keepBench: false })).not.toHaveProperty("keepBench");
     // A stage served only from the profile file has no row: it reclaims, the default.
     expect(await keepFor({ ...must(installedFor("review"), "review"), coordinatorProfileId: "file-only" })).toBe(false);
   });
 
   test("a stage whose cards choose: claims ask for v2, and the printed policy is its cardCheckpointPolicy", async () => {
-    const Reply = z.object({ checkpointPolicy: z.object({ version: z.string() }).loose(), nextSteps: z.array(z.string()),
-      stage: BenchStageView });
+    // The policy is printed under the SuperPipeline stage field it goes in, because a person copies
+    // the key with the value: a v2 policy under `checkpointPolicy` lands where SuperPipeline refuses it.
+    const Policy = z.object({ version: z.string() }).loose();
+    const Reply = z.object({ checkpointPolicy: Policy.optional(), cardCheckpointPolicy: Policy.optional(),
+      nextSteps: z.array(z.string()), stage: BenchStageView });
     const on = Reply.parse(await (await call("PATCH", "/stages/review", { cardsChoose: true, defaultRepositories: ["app"] })).json());
-    expect(on.checkpointPolicy).toMatchObject({ version: "superpipeline.checkpoint-policy.v2", repositorySelection: "card",
+    expect(on.cardCheckpointPolicy).toMatchObject({ version: "superpipeline.checkpoint-policy.v2", repositorySelection: "card",
       defaultRepositories: ["app"], repositories: [{ name: "app", provider: "forge", repository: "example/app" }], checkpointRepository: "app" });
+    expect(on.checkpointPolicy).toBeUndefined();
     expect(on.stage).toMatchObject({ cardsChoose: true, defaultRepositories: ["app"] });
-    expect(on.nextSteps.join("\n")).toContain("cardCheckpointPolicy");
+    const step = on.nextSteps.find((s) => s.includes("set the stage's"));
+    expect(step).toContain("set the stage's cardCheckpointPolicy to the cardCheckpointPolicy above");
+    expect(step).toContain('"checkpointPolicy": null');
+    // The doctor names it the same way, in its report and in its manual step.
+    const doctor = z.object({ manual: z.array(z.string()), checkpointPolicy: Policy.optional(), cardCheckpointPolicy: Policy.optional() })
+      .parse(await (await call("GET", "/doctor?stage=review")).json());
+    expect(doctor.cardCheckpointPolicy?.version).toBe("superpipeline.checkpoint-policy.v2");
+    expect(doctor.checkpointPolicy).toBeUndefined();
+    expect(doctor.manual.join("\n")).toContain("(see cardCheckpointPolicy)");
     expect(must(installedFor("review"), "card profile")).toMatchObject({ repositorySelection: "card", defaultRepositories: ["app"] });
     expect(checkpointRuntime(tenantId, BOARD2, stationId, "review")?.port.choosesRepositories).toBe(true);
     // The node's registry keeps the allow-list as it was: the choice is per prepare.
     expect(node.profiles.get("review")?.repositories.map((r) => r.name)).toEqual(["app"]);
 
     const off = Reply.parse(await (await call("PATCH", "/stages/review", { cardsChoose: false })).json());
-    expect(off.checkpointPolicy.version).toBe("superpipeline.checkpoint-policy.v1");
+    expect(off.checkpointPolicy?.version).toBe("superpipeline.checkpoint-policy.v1");
+    expect(off.cardCheckpointPolicy).toBeUndefined();
+    expect(off.nextSteps.join("\n")).toContain("set the stage's checkpointPolicy to the checkpointPolicy above");
     expect(off.stage.cardsChoose).toBe(false);
     const fixed = must(installedFor("review"), "fixed profile");
     expect(fixed.repositorySelection).toBeUndefined();

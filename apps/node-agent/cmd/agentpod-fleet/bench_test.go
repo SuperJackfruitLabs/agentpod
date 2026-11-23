@@ -190,12 +190,33 @@ func TestBenchDoctorPrintsPassAndFailLines(t *testing.T) {
 		t.Errorf("asked %s?%s", path, query)
 	}
 	for _, line := range []string{"PASS  hub: checkpoint coordinator", "FAIL  benchd: reachable", "      next: Host step: start benchd",
-		"SKIP  benchd: storage", "WARN  stage: SuperPipeline stage", "      next: fleet bench stage set review --stage-id STAGE_ID", "Manual steps", "  - SuperPipeline: link the board agent", `"kind": "superbench"`} {
+		"SKIP  benchd: storage", "WARN  stage: SuperPipeline stage", "      next: fleet bench stage set review --stage-id STAGE_ID", "Manual steps", "  - SuperPipeline: link the board agent", "The stage's checkpointPolicy for SuperPipeline:", `"kind": "superbench"`} {
 		if !strings.Contains(out, line) {
 			t.Errorf("output lacks %q:\n%s", line, out)
 		}
 	}
 	if strings.Contains(out, "next: Host step: start benchd\n      next") {
 		t.Error("a passing check printed a next step")
+	}
+}
+
+// TestBenchDoctorNamesTheCardPolicyField: a stage whose cards choose reports its policy as
+// cardCheckpointPolicy, and the doctor prints it under that name, the SuperPipeline field it goes in;
+// a person copies the name with the value.
+func TestBenchDoctorNamesTheCardPolicyField(t *testing.T) {
+	bin := build(t)
+	rec := &recorded{}
+	srv := rec.server(t, `{"ok":true,"checks":[{"check":"hub: checkpoint coordinator","ok":true,"detail":"on"}],
+		"manual":[],"cardCheckpointPolicy":{"version":"superpipeline.checkpoint-policy.v2"}}`)
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	out, code := run(t, bin, env, "bench", "doctor", "review")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, "The stage's cardCheckpointPolicy for SuperPipeline:") || !strings.Contains(out, `"superpipeline.checkpoint-policy.v2"`) {
+		t.Errorf("the card policy is not printed under its field:\n%s", out)
+	}
+	if strings.Contains(out, "The stage's checkpointPolicy") {
+		t.Errorf("a card stage's policy was named checkpointPolicy:\n%s", out)
 	}
 }

@@ -19,6 +19,16 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   answered `200 {"status":"ignored"}` on both doors instead of 503, so the relay
   no longer spends ten retries on it. A rostered board with no dispatch yet is
   still 503.
+- `fleet bench stage add|set` for a stage whose cards choose (`--cards-choose`)
+  prints its policy under `cardCheckpointPolicy`, the SuperPipeline stage field it
+  goes in; it was printed as `checkpointPolicy`, the field SuperPipeline refuses a
+  v2 policy in, and a person copying it got it wrong. A fixed stage still prints
+  `checkpointPolicy`. The next step names the field and, for a card stage, says
+  to clear `checkpointPolicy` in the same PATCH. `fleet bench doctor` (and its
+  `--json` report) names the policy the same way.
+- `fleet bench stage set NAME --keep-bench` and `--keep-bench=false` report the
+  flip in the reply's `changed` (`keepBench`, before and after); it answered
+  `changed: {}`.
 
 ### Added
 

@@ -76,7 +76,7 @@ func fleetBenchStage(args []string) {
 	station := fs.String("station", "", "station id the stage runs on")
 	agent := fs.String("agent", "", "the SuperPipeline board agent (agt_) linked to the station's occupant")
 	sourceTenant := fs.String("source-tenant", "", "the SuperPipeline tenant (tnt_); default: this workspace's other stages'")
-	stageID := fs.String("stage-id", "", "the SuperPipeline stage it serves, to print its checkpointPolicy command")
+	stageID := fs.String("stage-id", "", "the SuperPipeline stage it serves, named in the printed policy's next step")
 	bridgeKey := fs.String("bridge-key", "", "roster key for the stage's bridge row (add)")
 	checkpointRepo := fs.String("checkpoint-repo", "", "the repository the harness starts in")
 	worker := fs.String("worker", "", "absolute path of the worker command on the bench host")
@@ -231,8 +231,11 @@ type benchDoctorReport struct {
 		Next   string `json:"next"`
 		Warn   bool   `json:"warn"`
 	} `json:"checks"`
-	Manual           []string        `json:"manual"`
-	CheckpointPolicy json.RawMessage `json:"checkpointPolicy"`
+	Manual []string `json:"manual"`
+	// One or the other, named for the SuperPipeline stage field it goes in: a person copies the name
+	// with the value.
+	CheckpointPolicy     json.RawMessage `json:"checkpointPolicy"`
+	CardCheckpointPolicy json.RawMessage `json:"cardCheckpointPolicy"`
 }
 
 // fleetBenchDoctor prints one line per check, PASS or FAIL with its next step, then the steps no
@@ -295,10 +298,16 @@ func renderBenchDoctor(w *os.File, report benchDoctorReport) bool {
 			fmt.Fprintf(w, "  - %s\n", m)
 		}
 	}
-	if len(report.CheckpointPolicy) > 0 && string(report.CheckpointPolicy) != "null" {
+	for _, p := range []struct {
+		field  string
+		policy json.RawMessage
+	}{{"checkpointPolicy", report.CheckpointPolicy}, {"cardCheckpointPolicy", report.CardCheckpointPolicy}} {
+		if len(p.policy) == 0 || string(p.policy) == "null" {
+			continue
+		}
 		var pretty bytes.Buffer
-		if json.Indent(&pretty, report.CheckpointPolicy, "  ", "  ") == nil {
-			fmt.Fprintf(w, "\nThe stage's checkpointPolicy for SuperPipeline:\n  %s\n", pretty.String())
+		if json.Indent(&pretty, p.policy, "  ", "  ") == nil {
+			fmt.Fprintf(w, "\nThe stage's %s for SuperPipeline:\n  %s\n", p.field, pretty.String())
 		}
 	}
 	return failed

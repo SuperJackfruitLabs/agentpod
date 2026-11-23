@@ -103,9 +103,11 @@ Node's new target. `stage set` re-sends only what changed (moving the board send
 the selector alone; the Node keeps the repositories and worker as installed) and
 re-derives the Hub's pins; `--refresh` does only that, and `--repin` re-pins the
 Node's worker and coordinator digests to the installed bytes after an update. The
-reply to `add` and `set` prints the stage's `checkpointPolicy` for SuperPipeline
-and the steps no verb takes. In it, `changed` is this stage's own pins that moved
-(each field with its value before and after), and `otherStagesRepinned` names the
+reply to `add` and `set` prints the stage's policy for SuperPipeline under the
+stage field it goes in (`checkpointPolicy`, or `cardCheckpointPolicy` for a stage
+whose cards choose; `doctor` does the same) and the steps no verb takes. In it,
+`changed` is this stage's own pins that moved, and `keepBench` when the write
+flipped it (each with its value before and after), and `otherStagesRepinned` names the
 *other* stages on the same Node that the write moved to the Node's new digest; on
 a Node that serves one stage it is empty, however much `changed` lists. `stage
 rm` answers `otherStagesRepinned` too.

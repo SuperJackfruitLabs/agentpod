@@ -2908,7 +2908,9 @@ written together: the node writes its registry and answers with its own
 registry_sha256, and the hub pins that. No restart, no hand-written JSON.
 --repo is the stage's allow-list of repositories. With --cards-choose each
 card chooses a subset of it, and its bench holds only those; --default-repo is
-what a card that names none gets. Moving a stage to another board is one
+what a card that names none gets. add, set and doctor print the stage's policy
+under the SuperPipeline stage field it goes in: checkpointPolicy, or
+cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A settled card's bench is reclaimed unless the
 stage is set --keep-bench.
 ```
@@ -2965,7 +2967,7 @@ fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-re
                      [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]
 ```
 
-In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories, unless `--cards-choose`: then each card chooses a subset of them in SuperPipeline, the hub's claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold `--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply prints the stage's `checkpointPolicy` (or, with `--cards-choose`, its `cardCheckpointPolicy`) for SuperPipeline and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.
+In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories, unless `--cards-choose`: then each card chooses a subset of them in SuperPipeline, the hub's claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold `--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply prints the stage's policy under the SuperPipeline stage field it goes in: `checkpointPolicy`, or with `--cards-choose` `cardCheckpointPolicy`, and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.
 
 | Argument | Meaning |
 |---|---|
@@ -2983,7 +2985,7 @@ In order, each step idempotent and each refusal naming the step: the station's r
 | `--env K=V` | string | — | KEY=VALUE for the worker: PATH, LANG, LC_ALL, TZ or TERM (repeatable). |
 | `--launch L` | string | — | Registered-v1 (default) or grouped. |
 | `--source-tenant tnt_…` | string | — | The SuperPipeline tenant (tnt_); default: this workspace's other stages'. |
-| `--stage-id ID` | string | — | The SuperPipeline stage it serves, to print its checkpointPolicy command. |
+| `--stage-id ID` | string | — | The SuperPipeline stage it serves, named in the printed policy's next step. |
 | `--bridge-key K` | string | — | Roster key for the stage's bridge row (add). |
 | `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
 | `--keep-bench` | bool | `false` | Keep a card's bench after its checkpoint settles; `--keep-bench`=false reclaims again (the default). |
@@ -3009,7 +3011,7 @@ fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkp
                      [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
 ```
 
-Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for this stage instead, and `--keep-bench=false` returns to the default.
+Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for this stage instead, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.
 
 | Argument | Meaning |
 |---|---|
@@ -3064,7 +3066,7 @@ Check everything a stage needs before its first card.
 fleet bench doctor NAME | --station S [--json]
 ```
 
-One PASS or FAIL line per check, each failure with its next step: this hub's coordinator flag, control pair and SuperPipeline audience; the station's occupant and node; the node's registry (configured, valid), benchd (reachable, managed, free space on its data and state volumes), the worker's and node's pinned digests against the installed bytes; the roster row, its credential source, a trial exchange of the agent's grant (`claim` and `run`), the run-only MCP token and the owner's dispatch grant; the hub's service grant (`checkpoints:submit` and `checkpoints:read`); and, for a stage, the hub's pins, the node's served target and its SuperPipeline stage id. A stage with no stage id (one adopted from the profile file) is a WARN line naming `--stage-id`, not a failure. Then the steps no verb takes (Accounts and SuperPipeline) and the stage's `checkpointPolicy`. Changes nothing. Exits 1 when a check failed.
+One PASS or FAIL line per check, each failure with its next step: this hub's coordinator flag, control pair and SuperPipeline audience; the station's occupant and node; the node's registry (configured, valid), benchd (reachable, managed, free space on its data and state volumes), the worker's and node's pinned digests against the installed bytes; the roster row, its credential source, a trial exchange of the agent's grant (`claim` and `run`), the run-only MCP token and the owner's dispatch grant; the hub's service grant (`checkpoints:submit` and `checkpoints:read`); and, for a stage, the hub's pins, the node's served target and its SuperPipeline stage id. A stage with no stage id (one adopted from the profile file) is a WARN line naming `--stage-id`, not a failure. Then the steps no verb takes (Accounts and SuperPipeline) and the stage's policy, under the SuperPipeline stage field it goes in: `checkpointPolicy`, or `cardCheckpointPolicy` for a stage whose cards choose. Changes nothing. Exits 1 when a check failed.
 
 | Argument | Meaning |
 |---|---|

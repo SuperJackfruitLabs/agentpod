@@ -81,7 +81,7 @@ const stageFields = {
   agentId: z.string().max(80).regex(/^agt_[A-Za-z0-9]{6,}(?![\s\S])/, "a superpipeline agent id looks like agt_…"),
   /** The SuperPipeline tenant (`tnt_`); defaults to the one this workspace's other stages use. */
   sourceTenantId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(?![\s\S])/).optional(),
-  /** The SuperPipeline stage this serves; only used to print its `checkpointPolicy` command. */
+  /** The SuperPipeline stage this serves; only used to name it in the printed policy's next step. */
   stageId: z.string().min(1).max(200).optional(),
   /**
    * The stage's allow-list of repositories, in any order (stored sorted by name). A claim's
