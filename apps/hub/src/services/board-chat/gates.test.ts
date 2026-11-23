@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { GATE_CANCELLED_DECISION, gateOutcomeBody } from "@superjackfruitlabs/treaty-matrix-events";
 import { OrgPlaneError } from "../../auth/org-plane/client";
 
 import {
@@ -655,6 +656,40 @@ describe("saying in the room that the board accepted an answer", () => {
       deps,
     );
     expect(replies[0]).toContain("Rejected");
+  });
+
+  test("a gate the board cancelled closes in treaty's words, naming nobody, once", async () => {
+    // The sweep's path for a card moved or archived with its review pending. A decider passed by
+    // mistake is not named, and no variant or hold rides along.
+    let claims = 0;
+    const asked: string[] = [];
+    const { deps, replies, outcomes } = receiptDeps({
+      markOutcomePosted: async () => ++claims === 1,
+      displayNameFor: async (id) => (asked.push(id), "rakesh"),
+    });
+    const cancelled = {
+      gateId: "gate_4e8b",
+      decision: GATE_CANCELLED_DECISION,
+      decidedBy: "prn_fixture",
+      chosen: { id: "v1", label: "Short version" },
+      heldUntil: "2026-11-16T09:00:00.000Z",
+    };
+    const card = { boardId: "brd_0123456789abcdef", eventId: GATE_EVENT_ID };
+    await settleGateOutcome(cancelled, "!room", card, deps);
+    await settleGateOutcome(cancelled, "!room", card, deps);
+    expect(replies).toEqual([gateOutcomeBody({ decision: GATE_CANCELLED_DECISION, decidedBy: null })]);
+    expect(replies[0]).toStartWith("Cancelled — ");
+    expect(outcomes).toEqual([
+      {
+        suite_event_type: GATE_OUTCOME_TYPE,
+        gate_id: "gate_4e8b",
+        board_id: "brd_0123456789abcdef",
+        decision: "cancelled",
+        decided_by: null,
+        "m.relates_to": { rel_type: "m.reference", event_id: GATE_EVENT_ID },
+      },
+    ]);
+    expect(asked).toEqual([]);
   });
 });
 

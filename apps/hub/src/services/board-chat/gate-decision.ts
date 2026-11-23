@@ -9,9 +9,11 @@ import type { MatrixGateQuorum, MatrixGateVariant } from "../../db/schema/matrix
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import {
+  GATE_CANCELLED_DECISION,
   GATE_DECISION_SUITE_TYPE,
   GATE_DECISION_V2_SUITE_TYPE,
   GATE_OUTCOME_TYPE,
+  gateOutcomeBody,
   isGateOptionId,
   heldTail,
   heldUntilOf,
@@ -694,9 +696,13 @@ export async function settleGateOutcome(
   try {
     if (deps.markOutcomePosted && !(await deps.markOutcomePosted(parsed.gateId))) return;
 
-    const who = principalId ? ((await deps.displayNameFor?.(principalId)) ?? null) : null;
-    const verb = outcomeVerb(parsed.optionId, decided.chosen ?? null);
-    const heldUntil = heldUntilOf(decided.heldUntil);
+    // A gate the board cancelled (its card moved or archived with the review pending) was decided by
+    // nobody: its receipt names no one and carries no variant or hold, whatever the caller passed.
+    const cancelled = parsed.optionId === GATE_CANCELLED_DECISION;
+    const who = principalId && !cancelled ? ((await deps.displayNameFor?.(principalId)) ?? null) : null;
+    const chosen = cancelled ? null : (decided.chosen ?? null);
+    const verb = outcomeVerb(parsed.optionId, chosen);
+    const heldUntil = cancelled ? null : heldUntilOf(decided.heldUntil);
     const tail = heldUntil ? heldTail(heldUntil) : "the board has it.";
     const body = OUTCOME_SENTENCES[parsed.optionId] ?? (who ? `${verb} by ${who} — ${tail}` : `${verb} — ${tail}`);
 
@@ -710,7 +716,7 @@ export async function settleGateOutcome(
       board_id: projection.boardId,
       decision: parsed.optionId,
       decided_by: who,
-      ...(decided.chosen ? { chosen_variant: { id: decided.chosen.id, label: decided.chosen.label } } : {}),
+      ...(chosen ? { chosen_variant: { id: chosen.id, label: chosen.label } } : {}),
       ...(heldUntil ? { held_until: heldUntil } : {}),
       "m.relates_to": { rel_type: "m.reference", event_id: projection.eventId },
     });
@@ -748,8 +754,11 @@ const OUTCOME_VERBS: Record<string, string> = {
 /**
  * Outcomes nobody chose, said as a whole sentence. A subject-bound gate whose subject passed its
  * `expires_at` is closed by the board as `expired` (charter: "Unanswered decisions remind, then
- * escalate" §7), and "Expired — the board has it" would read as though someone had answered.
+ * escalate" §7), and "Expired — the board has it" would read as though someone had answered. A
+ * gate the board cancelled (`cancelled`) is the same: nobody decided it.
  */
 const OUTCOME_SENTENCES: Record<string, string> = {
   expired: "Expired — what this gate approves passed its expiry before anyone approved it, so it can no longer be approved here.",
+  // A gate the board cancelled: treaty's own sentence, so every carrier closes the card in the same words.
+  [GATE_CANCELLED_DECISION]: gateOutcomeBody({ decision: GATE_CANCELLED_DECISION, decidedBy: null }),
 };

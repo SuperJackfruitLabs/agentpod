@@ -47,6 +47,7 @@ import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
 import {
+  GATE_CANCELLED_DECISION,
   isDeliveryPending,
   type DeliveryPendingDelivery,
   isAttentionPending,
@@ -389,15 +390,17 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
       if (stillPending.has(posted.gateId)) continue;
       try {
         const decided = await deps.decisionFor?.(boardId, posted.gateId);
-        // Absence is not a decision. A board that cannot say WHAT was decided leaves the card
-        // alone: posting "resolved" without the outcome would be inventing one, and a room that
-        // says a gate was decided but not how is worse than one that still asks.
+        // Absence is not a decision. A board that cannot say WHAT was decided — or that it was
+        // cancelled — leaves the card alone: posting "resolved" without the outcome would be
+        // inventing one, and a room that says a gate was decided but not how is worse than one
+        // that still asks. Only a gate this hub posted is settled here; a cancelled gate it never
+        // posted has no row, and is never posted (the board no longer lists it as pending).
         if (!decided) continue;
         if (
           await deps.settleOutcome?.(posted.gateId, decided.decision, decided.decidedBy, decided.chosen ?? null, decided.heldUntil ?? null)
         ) {
           settled++;
-          log.info("settled a room card for a gate decided elsewhere", {
+          log.info("settled a room card for a gate decided or cancelled elsewhere", {
             gateId: posted.gateId,
             boardId,
             decision: decided.decision,
@@ -680,9 +683,14 @@ export function bridgeGateSweepDeps(
       const token = (await tokensForBoards()).get(boardId);
       if (!token) return null;
       const g = await new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).gate(gateId);
-      // Only a RESOLVED gate settles a card. A gate that is somehow neither pending nor resolved
-      // is a shape this hub does not model, and guessing at it would put a wrong word in a room.
-      if (!g || g.status !== "resolved" || !g.decision) return null;
+      if (!g) return null;
+      // A gate the board CANCELLED (its card moved by hand or archived while the review was pending;
+      // SuperPipeline publishes no event for that) settles its card too, with treaty's `cancelled`,
+      // naming nobody: left open, the card would go on offering answers the board will not take.
+      if (g.status === "cancelled") return { decision: GATE_CANCELLED_DECISION, decidedBy: null, chosen: null, heldUntil: null };
+      // Otherwise only a RESOLVED gate settles a card. Any other status is a shape this hub does
+      // not model, and guessing at it would put a wrong word in a room.
+      if (g.status !== "resolved" || !g.decision) return null;
       // A held approval pulled back before this hub closed its card (charter 2026-11-09, an approval
       // may wait for its release time §4) went back for rework: the card reads as changes requested,
       // by whoever pulled it back, never as an approval that will act.

@@ -1884,6 +1884,10 @@ the board's room — once per decision and notice, claimed in `matrix_decision_n
     escalated card was not moved`, `could not read a board to move its escalated cards`.
 - **An expired subject** closes its gate as `expired`; the sweep settles the room card with the
   `Expired — …` receipt (`decision: "expired"`, `decided_by: null`).
+- **A cancelled gate** (its card moved by hand or archived while the review was pending; the board
+  reads the gate as `cancelled` and sends no event): the sweep settles the room card with treaty's
+  `Cancelled — …` receipt (`decision: "cancelled"`, `decided_by: null`), once. A cancelled gate the
+  hub never posted is never posted.
 
 Logs: `matrix-decision-notices` (`a decision reminded`, `a decision escalated to the workspace admins`
 with `admins` and `invited`, `an escalation could not invite a workspace admin`) and

@@ -15,6 +15,7 @@
  */
 
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { GATE_CANCELLED_DECISION } from "@superjackfruitlabs/treaty-matrix-events";
 
 import { bridgeGateSweepDeps, startGateSweeper, sweepBoardNow, sweepGates, type GateSweepDeps } from "./gate-sweep";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
@@ -895,5 +896,77 @@ describe("a board whose chat has moved", () => {
     await first;
     stop?.();
     expect(posted).toEqual(["https://board.test/v1/boards/brd_one/push-configs"]);
+  });
+});
+
+/**
+ * A gate the board cancelled — its card moved by hand or archived while the review was pending.
+ * SuperPipeline publishes no event for it; the gate's status becomes `cancelled`, and the sweep is
+ * the only path that can close the room card. Settled as a gate decided elsewhere is: one receipt,
+ * treaty's `cancelled`, naming nobody. One never posted is never posted.
+ */
+/** The bridge's deps over a board that reads one gate as `boardRead`. */
+function readingGate(boardRead: Record<string, unknown>) {
+  return bridgeGateSweepDeps(
+    { baseUrl: "https://board.test", source: "superpipeline" },
+    { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) },
+    async () => ({ status: 200, ok: true, json: async () => ({ gate: boardRead }) }),
+    async () => [{ boardId: "brd_one", token: `spa_${"a".repeat(48)}` }],
+  );
+}
+
+describe("a gate the board cancelled", () => {
+  const reading = readingGate;
+
+  test("reads as treaty's cancelled, naming nobody, whatever else the board's read carries", async () => {
+    const decided = await reading({ status: "cancelled", decision: null, decidedBy: null }).decisionFor?.("brd_one", "gate_c");
+    expect(decided).toEqual({ decision: GATE_CANCELLED_DECISION, decidedBy: null, chosen: null, heldUntil: null });
+    const stale = await reading({ status: "cancelled", decision: "approve", decidedBy: "prn_someone" }).decisionFor?.("brd_one", "gate_c");
+    expect(stale).toEqual({ decision: GATE_CANCELLED_DECISION, decidedBy: null, chosen: null, heldUntil: null });
+  });
+
+  test("a status this hub does not model still settles nothing", async () => {
+    expect(await reading({ status: "withdrawn", decision: null, decidedBy: null }).decisionFor?.("brd_one", "gate_c")).toBeNull();
+    expect(await reading({ status: "pending", decision: null, decidedBy: null }).decisionFor?.("brd_one", "gate_c")).toBeNull();
+  });
+
+  test("the sweep settles its posted card once", async () => {
+    const settled: unknown[][] = [];
+    const claimed = new Set<string>();
+    const deps: GateSweepDeps = {
+      boards: async () => ["brd_one"],
+      tenantIdFor: async () => "flt_a",
+      pendingGates: async () => [],
+      project: async () => ({ status: "already" }),
+      postedGatesAwaitingOutcome: async () => (claimed.has("gate_c") ? [] : [{ gateId: "gate_c", cardId: "crd_1" }]),
+      decisionFor: async (boardId, gateId) =>
+        (await reading({ status: "cancelled", decision: null, decidedBy: null }).decisionFor?.(boardId, gateId)) ?? null,
+      settleOutcome: async (...args) => {
+        settled.push(args);
+        claimed.add(args[0]);
+        return true;
+      },
+    };
+    expect((await sweepGates(deps)).settled).toBe(1);
+    expect((await sweepGates(deps)).settled).toBe(0);
+    expect(settled).toEqual([["gate_c", "cancelled", null, null, null]]);
+  });
+
+  test("one never posted is never posted, and nothing is asked about it", async () => {
+    let projected = 0;
+    let read = 0;
+    let settles = 0;
+    const result = await sweepGates({
+      boards: async () => ["brd_one"],
+      tenantIdFor: async () => "flt_a",
+      // Cancelled: the board no longer lists it as pending, and this hub holds no row for it.
+      pendingGates: async () => [],
+      project: async () => (projected++, { status: "sent", eventId: "$card", roomId: "!r" }),
+      postedGatesAwaitingOutcome: async () => [],
+      decisionFor: async () => (read++, { decision: GATE_CANCELLED_DECISION, decidedBy: null }),
+      settleOutcome: async () => (settles++, true),
+    });
+    expect(result).toMatchObject({ checked: 0, projected: 0, settled: 0 });
+    expect({ projected, read, settles }).toEqual({ projected: 0, read: 0, settles: 0 });
   });
 });

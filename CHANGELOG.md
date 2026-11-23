@@ -10,6 +10,14 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Fixed
+
+- A gate SuperPipeline cancels (its card moved by hand or archived while the review
+  was pending) now closes its card in chat. The gate sweep reads it as `cancelled`
+  and posts treaty's `cancelled` receipt, naming nobody, once; a cancelled gate the
+  hub never posted is never posted. Before, the card stayed open and answerable.
+  SuperExchange settles it the same way. Needs treaty v0.0.18.
+
 ### Changed
 
 - The push doors (`/public/bridge/superpipeline/push` and `/work`) accept only the
