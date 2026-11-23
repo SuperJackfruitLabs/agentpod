@@ -15,6 +15,8 @@ import { createSuperpipelinePushRoutes } from "./superpipeline-push";
  * - any other 4xx: permanently refused, such as an invalid body.
  *
  * The relay drops every 4xx but 408 and 429, so an unmapped board answered 404 would be lost there.
+ * And a board this hub will never map (known by neither its roster nor a dispatch, such as a board
+ * SuperExchange carries) is 200 and ignored: a 503 there costs the relay every retry for nothing.
  */
 
 const SECRET = "receiver-status-secret";
@@ -33,6 +35,8 @@ function deps(over: Partial<SuperpipelineEventsDeps> = {}): SuperpipelineEventsD
     secret: SECRET,
     domain: "id.agentpod.dev",
     tenantIdFor: async () => null,
+    // The board is rostered here but never dispatched for: known, not mapped yet.
+    tenantsForBoard: async () => ["tnt_rostered"],
     boardRoom: async () => null,
     sendText: async () => "$prose",
     sendCustomEvent: async () => "$gate",
@@ -67,6 +71,25 @@ for (const [name, door] of [["the event relay", relay], ["the direct push", push
         const res = await door(deps(), body, decisionEventType(String(body.event)));
         expect({ schema, status: res.status }).toEqual({ schema, status: 503 });
       }
+    });
+
+    test("a board this hub knows by neither roster nor dispatch is 200 and ignored, not retried", async () => {
+      for (const schema of ["gate.pending.v1", "elicitation.pending.v1", "delivery.pending.v1", "attention.pending.v1"]) {
+        const body = valid(schema);
+        const res = await door(deps({ tenantsForBoard: async () => [] }), body, decisionEventType(String(body.event)));
+        expect({ schema, status: res.status, body: await res.json() }).toEqual({
+          schema,
+          status: 200,
+          body: { ok: true, status: "ignored" },
+        });
+      }
+      const body = valid("check.failed.v1");
+      const res = await door(
+        deps({ tenantsForBoard: async () => [], handleCheckFailed: async () => ({ status: "unknown-board" }) }),
+        body,
+        decisionEventType("check.failed"),
+      );
+      expect(res.status).toBe(200);
     });
 
     test("a handler that finds no tenant for the board is 503 too", async () => {

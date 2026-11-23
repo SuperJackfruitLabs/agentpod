@@ -26,8 +26,10 @@ also carries its older `X-Superpipeline-Signature`, over the body alone; the hub
 only from a board that sends no `x-treaty-signature` at all.
 
 Each door answers by the suite's receiver status contract, so the board and the relay know whether
-to try again: **2xx** when the event was handled, or is one the hub does not take; **503** when it
-cannot be handled yet, such as a board the hub has not mapped to a workspace, so the sender retries;
+to try again: **2xx** when the event was handled, or is one the hub does not take, or is for a
+board the hub will never carry (one on no roster here and never dispatched for, such as a board
+SuperExchange carries); **503** when it cannot be handled yet, such as a rostered board the hub has
+not mapped to a workspace because nothing has been dispatched for it, so the sender retries;
 **400** when the body is not the event it says it is, which no retry will fix.
 
 The three exist only on a hub with a Matrix bridge configured. The hub registers the push

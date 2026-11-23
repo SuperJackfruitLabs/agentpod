@@ -40,6 +40,9 @@ function deps(over: Partial<SuperpipelinePushDeps> = {}): SuperpipelinePushDeps 
     secret: SECRET,
     domain: "id.agentpod.dev",
     tenantIdFor: async () => "fleet_00000000000000000001",
+    // The board is on this hub's roster, so one with no dispatch yet is unmapped (503), not
+    // another receiver's (200 ignored; `superpipeline-receiver-status.test.ts`).
+    tenantsForBoard: async () => ["fleet_00000000000000000001"],
     sendText: async () => "$prose",
     sendCustomEvent: async (_u, _r, _t, content) => {
       projected.push(content);

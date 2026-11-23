@@ -16,7 +16,8 @@
  * believed. Authentication is the door's; nothing here reads a header.
  */
 import { createLogger } from "../utils/logger";
-import { isBoardMoved, projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
+import { isBoardMoved, projectGate, tenantsForBoard, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
+import type { TenantsForBoard } from "../services/board-chat";
 import { projectElicitation, projectDelivery, projectAttention } from "../services/board-chat";
 import type { AttentionProjectionDeps, DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/board-chat";
 import { handleDecisionTimeout, handleGateApprovalRecorded, handleDecisionPulledBack, handleDecisionReleased } from "../services/board-chat";
@@ -64,6 +65,11 @@ export const DECISION_TYPES: ReadonlyMap<string, string> = new Map(DECISION_EVEN
 export interface DecisionDeps extends GateProjectionDeps {
   /** Which fleet this board's gates belong to. */
   tenantIdFor(boardId: string): Promise<string | null>;
+  /**
+   * Every tenant that knows a board here, by roster or by dispatch: decides whether a board no
+   * fleet is mapped to is worth a retry (`unmappedBoard`). Defaults to `tenantsForBoard`.
+   */
+  tenantsForBoard?: TenantsForBoard;
   /** A posted waiting card goes on the board's humans' fleet Live Activity (`boardProjectionDeps`). */
   onAttentionPosted?: AttentionProjectionDeps["onAttentionPosted"];
   /**
@@ -109,8 +115,9 @@ export interface DecisionResult {
 /**
  * The receiver status contract both doors follow (treaty phase 2, ruling 4; treaty's
  * `schemas/README.md`): 2xx is handled, or permanently ignored, such as an event this hub does not
- * take; 503 is transient, such as a board this hub has not mapped yet, so the sender tries again;
- * any other 4xx is permanently refused, such as an invalid body.
+ * take or a board it will never carry (`unmappedBoard`); 503 is transient, such as a board this hub
+ * has not mapped yet, so the sender tries again; any other 4xx is permanently refused, such as an
+ * invalid body.
  */
 const UNKNOWN_BOARD: DecisionResult = { status: 503, body: { error: "unknown board" } };
 
@@ -159,7 +166,32 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
     log.info("push for a board whose chat has moved; not posted", { boardId });
     return { status: 200, body: { ok: true, status: "moved" } };
   }
+  const result = await handleKnownDecision(body, deps, via);
+  if (result.status !== 503 || typeof boardId !== "string") return result;
+  return unmappedBoard(boardId, deps, via);
+}
 
+/**
+ * A board no fleet here is mapped to: retry it, or let it go?
+ *
+ * A board is mapped by its first dispatch (`tenantForBoard` reads `bridge_dispatches`), and this hub
+ * dispatches only for boards on its roster (`bridge_agents`). So a board on the roster with no
+ * dispatch yet is a board being set up: 503, and the sender tries again. A board known by neither
+ * roster nor dispatch is one this hub never polls, dispatches for or subscribes to, so nothing will
+ * map it: a board another receiver carries (opted in to SuperExchange) or another hub's. 200 and
+ * ignored, as SuperExchange answers for a board not opted in to it; a 503 would only spend the
+ * relay's retries. Should the board be rostered later, the gate sweep is the floor that posts what
+ * it still waits on.
+ */
+async function unmappedBoard(boardId: string, deps: DecisionDeps, via: DecisionDoor): Promise<DecisionResult> {
+  const tenants = await (deps.tenantsForBoard ?? tenantsForBoard)(boardId);
+  if (tenants.length > 0) return UNKNOWN_BOARD;
+  log.info("a decision for a board this hub does not carry; ignored", { boardId, via });
+  return { status: 200, body: { ok: true, status: "ignored" } };
+}
+
+/** `handleDecision` past the moved-board check: a 503 here is a board no fleet is mapped to. */
+async function handleKnownDecision(body: unknown, deps: DecisionDeps, via: DecisionDoor): Promise<DecisionResult> {
   /**
    * An agent's question travels the same door as a gate.
    *

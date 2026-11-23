@@ -8,6 +8,7 @@ export { projectAttention, recordedAttention } from "./attention-projection";
 export type { AttentionProjectionDeps } from "./attention-projection";
 export { reconcileBoardAttention } from "./fleet-attention";
 export { relayTokenForBoard } from "./relay-scope";
+export type { TenantsForBoard } from "./relay-scope";
 export { handleDecisionTimeout, repostEscalationsOnJoin, retryEscalationReposts } from "./decision-notices";
 export type { DecisionNoticeDeps, DecisionNoticeOutcome } from "./decision-notices";
 export { projectDelivery } from "./delivery-projection";
@@ -35,7 +36,7 @@ export { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicit
 export { clearAttentionDecision } from "./fleet-attention";
 export { handleGateDecision, parseGateDecision, settleGateOutcome } from "./gate-decision";
 export { handleGatePullBack } from "./gate-pull-back";
-export { roomAgentUser } from "./gate-reads";
+export { roomAgentUser, tenantsForBoard } from "./gate-reads";
 export { answerAttentionAtSuperpipeline, overrideCheckAtSuperpipeline, pullBackAtSuperpipeline, resolveGateAtSuperpipeline, updateDeliveryAtSuperpipeline } from "./gate-resolve";
 export { readBoardGate } from "./gate-sweep";
 export { legacyRequestEvents } from "./legacy-events";
