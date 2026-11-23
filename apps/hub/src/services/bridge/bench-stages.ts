@@ -286,13 +286,28 @@ export function checkpointPolicyFor(profile: CheckpointProfile) {
     ...(profile.defaultRepositories ? { defaultRepositories: [...profile.defaultRepositories] } : {}) };
 }
 
-/** The stage field the printed policy belongs in. */
-const policyField = (profile: CheckpointProfile) => profile.repositorySelection === "card" ? "cardCheckpointPolicy" : "checkpointPolicy";
+/**
+ * The SuperPipeline stage field the printed policy belongs in, and the key it is printed under: a
+ * person copies the key with the value, so a v2 policy printed as `checkpointPolicy` was pasted
+ * into the field SuperPipeline refuses it in.
+ */
+const policyField = (profile: CheckpointProfile): "cardCheckpointPolicy" | "checkpointPolicy" =>
+  profile.repositorySelection === "card" ? "cardCheckpointPolicy" : "checkpointPolicy";
+
+/** `{ checkpointPolicy: … }` or `{ cardCheckpointPolicy: … }`: the policy under its stage field's name. */
+export function printedPolicy(profile: CheckpointProfile) {
+  const policy = checkpointPolicyFor(profile);
+  return policyField(profile) === "cardCheckpointPolicy" ? { cardCheckpointPolicy: policy } : { checkpointPolicy: policy };
+}
 
 function nextSteps(profile: CheckpointProfile, stageId: string | null, hasMcpToken: boolean): string[] {
+  const field = policyField(profile);
   const steps = [
     `SuperPipeline: link the board agent ${profile.target.agent_id} to the agent principal ${profile.occupantPrincipalId} (a person does this in SuperPipeline).`,
-    `SuperPipeline: set the stage's ${policyField(profile)} to the policy above (PATCH the stage ${stageId ?? "STAGE"} on board ${profile.target.board_id}).`,
+    `SuperPipeline: set the stage's ${field} to the ${field} above (PATCH the stage ${stageId ?? "STAGE"} on board ${profile.target.board_id})` +
+      (field === "cardCheckpointPolicy"
+        ? ', with "checkpointPolicy": null in the same PATCH if the stage has one: a stage carries one or the other.'
+        : "."),
     "Accounts: the hub's service principal needs the checkpoints:submit and checkpoints:read scopes (once per deployment).",
   ];
   if (!hasMcpToken)
@@ -301,16 +316,24 @@ function nextSteps(profile: CheckpointProfile, stageId: string | null, hasMcpTok
   return steps;
 }
 
-/** This stage's own pins that a write changed, by field, with the value before and after. */
-function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProfile): Record<string, { from: string; to: string }> {
+/**
+ * This stage's own pins that a write changed, by field, with the value before and after — and
+ * `keepBench`, which lives on the hub's row rather than in the pins, when the write flipped it.
+ */
+function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProfile,
+  keepBench?: { from: boolean; to: boolean }): Record<string, { from: string | boolean; to: string | boolean }> {
   if (!before) return {};
-  return Object.fromEntries(targetDifference(after.target, before.target)
-    .map((k) => [k, { from: before.target[k], to: after.target[k] }]));
+  return Object.fromEntries([
+    ...targetDifference(after.target, before.target).map((k) => [k, { from: before.target[k], to: after.target[k] }] as const),
+    ...(keepBench && keepBench.from !== keepBench.to ? [["keepBench", keepBench] as const] : []),
+  ]);
 }
 
 async function finish(userId: string, tenantId: string, name: string, profile: CheckpointProfile, stageId: string | null,
   status: BenchRegistryStatus, created: boolean, rosterKey: string, before?: CheckpointProfile,
   keepBench?: boolean): Promise<StageResult> {
+  // Read before the write: a stage with no row yet (one adopted from the profile file) reclaims, the default.
+  const keptBefore = (await readStage(tenantId, name))?.row.keepBench ?? false;
   await upsertStage({ tenantId, name, profile, stageId, origin: "fleet", createdBy: userId, ...(keepBench === undefined ? {} : { keepBench }) });
   const kept = (await readStage(tenantId, name))?.row.keepBench ?? false;
   const repinned = await repinNode(tenantId, profile.target.node_id, status, name);
@@ -319,11 +342,12 @@ async function finish(userId: string, tenantId: string, name: string, profile: C
     .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, rosterKey)));
   return {
     status: created ? 201 : 200,
-    // `changed` is this stage's own pins; `otherStagesRepinned` names the other stages on the node that
+    // `changed` is this stage's own pins and `keepBench`; `otherStagesRepinned` names the other stages on the node that
     // were moved to its new digest. Named so: a bare `repinned: []` read as "nothing was repinned".
-    body: { stage: view(profile, "fleet", stageId, { ok: true, status }, kept), changed: pinChanges(before, profile),
+    body: { stage: view(profile, "fleet", stageId, { ok: true, status }, kept),
+      changed: pinChanges(before, profile, { from: keptBefore, to: kept }),
       otherStagesRepinned: repinned,
-      checkpointPolicy: checkpointPolicyFor(profile),
+      ...printedPolicy(profile),
       nextSteps: nextSteps(profile, stageId, Boolean(row?.mcp)) },
   };
 }

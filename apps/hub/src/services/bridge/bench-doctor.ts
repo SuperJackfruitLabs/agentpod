@@ -21,7 +21,7 @@ import { checkBridgeDispatchGrant } from "./dispatch-grant";
 import { trialAgentGrant } from "./roster";
 import { nodeRegistryStatus } from "./bench-node";
 import { CHECKPOINT_SERVICE_SCOPES, serviceGrant } from "./bench-service-grant";
-import { checkpointPolicyFor, stageProfile, targetDifference } from "./bench-stages";
+import { printedPolicy, stageProfile, targetDifference, type checkpointPolicyFor } from "./bench-stages";
 
 /** Below this much free space on either bench volume the doctor fails the storage line. */
 export const MIN_FREE_BYTES = 1024 ** 3;
@@ -34,7 +34,10 @@ export interface DoctorReport {
   stationId?: string;
   checks: BenchDoctorCheck[];
   manual: string[];
+  /** A stage with fixed repositories: the policy for SuperPipeline's `checkpointPolicy`. */
   checkpointPolicy?: ReturnType<typeof checkpointPolicyFor>;
+  /** A stage whose cards choose (`--cards-choose`): the policy for SuperPipeline's `cardCheckpointPolicy`. */
+  cardCheckpointPolicy?: ReturnType<typeof checkpointPolicyFor>;
 }
 
 const REGISTRY_NEXT: Record<string, string> = {
@@ -186,9 +189,9 @@ export async function benchDoctor(tenantId: string, q: { name?: string; stationI
     `Accounts: the hub's service principal holds ${CHECKPOINT_SERVICE_SCOPES.join(" and ")} (once per deployment).`,
     `SuperPipeline: the board agent${profile ? ` ${profile.target.agent_id}` : ""} is linked to the agent principal (a person does this).`,
     profile?.repositorySelection === "card"
-      ? "SuperPipeline: the stage's cardCheckpointPolicy names this node, station and agent, and the stage's allow-list (see checkpointPolicy); each card chooses from it."
+      ? "SuperPipeline: the stage's cardCheckpointPolicy names this node, station and agent, and the stage's allow-list (see cardCheckpointPolicy); each card chooses from it. The stage has no checkpointPolicy beside it."
       : "SuperPipeline: the stage's checkpointPolicy names this node, station and agent, and the stage's repositories (see checkpointPolicy).",
   ];
   return { ok: !failed, ...(q.name ? { stage: q.name } : {}), stationId, checks, manual,
-    ...(profile ? { checkpointPolicy: checkpointPolicyFor(profile) } : {}) };
+    ...(profile ? printedPolicy(profile) : {}) };
 }

@@ -20,7 +20,7 @@ export const benchStages = pgTable("bench_stages", {
   name: text("name").notNull(),
   boardId: text("board_id").notNull(),
   stationId: text("station_id").notNull(),
-  /** The SuperPipeline stage this serves, when given: only used to print its `checkpointPolicy` command. */
+  /** The SuperPipeline stage this serves, when given: only used to name it in the printed policy's next step. */
   stageId: text("stage_id"),
   origin: text("origin").notNull(),
   /** Keep a card's bench after its checkpoint settles (`--keep-bench`); off means it is reclaimed. */

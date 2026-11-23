@@ -2369,7 +2369,9 @@ written together: the node writes its registry and answers with its own
 registry_sha256, and the hub pins that. No restart, no hand-written JSON.
 --repo is the stage's allow-list of repositories. With --cards-choose each
 card chooses a subset of it, and its bench holds only those; --default-repo is
-what a card that names none gets. Moving a stage to another board is one
+what a card that names none gets. add, set and doctor print the stage's policy
+under the SuperPipeline stage field it goes in: checkpointPolicy, or
+cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A settled card's bench is reclaimed unless the
 stage is set --keep-bench.
 --- stderr
@@ -2396,7 +2398,9 @@ written together: the node writes its registry and answers with its own
 registry_sha256, and the hub pins that. No restart, no hand-written JSON.
 --repo is the stage's allow-list of repositories. With --cards-choose each
 card chooses a subset of it, and its bench holds only those; --default-repo is
-what a card that names none gets. Moving a stage to another board is one
+what a card that names none gets. add, set and doctor print the stage's policy
+under the SuperPipeline stage field it goes in: checkpointPolicy, or
+cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A settled card's bench is reclaimed unless the
 stage is set --keep-bench.
 --- stderr
@@ -2438,7 +2442,9 @@ written together: the node writes its registry and answers with its own
 registry_sha256, and the hub pins that. No restart, no hand-written JSON.
 --repo is the stage's allow-list of repositories. With --cards-choose each
 card chooses a subset of it, and its bench holds only those; --default-repo is
-what a card that names none gets. Moving a stage to another board is one
+what a card that names none gets. add, set and doctor print the stage's policy
+under the SuperPipeline stage field it goes in: checkpointPolicy, or
+cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A settled card's bench is reclaimed unless the
 stage is set --keep-bench.
 
@@ -2467,7 +2473,9 @@ written together: the node writes its registry and answers with its own
 registry_sha256, and the hub pins that. No restart, no hand-written JSON.
 --repo is the stage's allow-list of repositories. With --cards-choose each
 card chooses a subset of it, and its bench holds only those; --default-repo is
-what a card that names none gets. Moving a stage to another board is one
+what a card that names none gets. add, set and doctor print the stage's policy
+under the SuperPipeline stage field it goes in: checkpointPolicy, or
+cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A settled card's bench is reclaimed unless the
 stage is set --keep-bench.
 

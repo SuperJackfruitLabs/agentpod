@@ -197,8 +197,8 @@ var adminCommands = []clidoc.Command{
 			"claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench " +
 			"with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold " +
 			"`--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply " +
-			"prints the stage's `checkpointPolicy` (or, with `--cards-choose`, its `cardCheckpointPolicy`) for " +
-			"SuperPipeline and the steps still manual. " +
+			"prints the stage's policy under the SuperPipeline stage field it goes in: `checkpointPolicy`, or with " +
+			"`--cards-choose` `cardCheckpointPolicy`, and the steps still manual. " +
 			"`--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name: the node registry profile id and the coordinator profile id"}},
 		Handlers: []string{"fleetBenchStage"},
@@ -240,7 +240,9 @@ var adminCommands = []clidoc.Command{
 			"the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. " +
 			"Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; " +
 			"a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for " +
-			"this stage instead, and `--keep-bench=false` returns to the default.",
+			"this stage instead, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin " +
+			"the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is " +
+			"printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name"}},
 		Handlers: []string{"fleetBenchStage"},
 		Flags: []clidoc.Flag{
@@ -276,7 +278,8 @@ var adminCommands = []clidoc.Command{
 			"`run`), the run-only MCP token and the owner's dispatch grant; the hub's service grant (`checkpoints:submit` and " +
 			"`checkpoints:read`); and, for a stage, the hub's pins, the node's served target and its SuperPipeline stage id. " +
 			"A stage with no stage id (one adopted from the profile file) is a WARN line naming `--stage-id`, not a failure. " +
-			"Then the steps no verb takes (Accounts and SuperPipeline) and the stage's `checkpointPolicy`. Changes nothing. " +
+			"Then the steps no verb takes (Accounts and SuperPipeline) and the stage's policy, under the SuperPipeline " +
+			"stage field it goes in: `checkpointPolicy`, or `cardCheckpointPolicy` for a stage whose cards choose. Changes nothing. " +
 			"Exits 1 when a check failed.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "a stage name; or give --station for a station with no stage yet"}},
 		Handlers: []string{"fleetBenchDoctor"},
