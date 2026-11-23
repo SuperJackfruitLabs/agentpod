@@ -73,21 +73,6 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   node serves. It then prints the Accounts and SuperPipeline steps no verb takes and
   the stage's `checkpointPolicy`. It changes nothing and exits 1 on a failure.
 
-- Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
-  delivers the worker's task to the payload only as SuperBench finite stdin and
-  reads its framed result from sealed stdout, then reads the run's receipt back
-  and releases the lease. Lost replies recover through the receipt with the same
-  request ID; nothing is resent. Off unless both the coordinator registry flag
-  and the profile opt in. See `docs/BENCH_REGISTERED_LAUNCH.md`.
-- The coordinator wire can refuse with `capacity_exhausted`; the hub reports it
-  by name on the parked attempt and never re-sends prepare or execute.
-
-- The private bench worker has an explicit `hermes-v1` adapter for bounded prompt
-  input and binding-matched task results. It requires a separately prepared
-  payload-owned Hermes home, executable, provider and model. No dispatcher enables
-  it by default; installed access, provider readiness and the producer crossing
-  remain separate verification requirements.
-
 ### Changed
 
 - Treaty pins move to 0.0.17 (`treaty-contracts`, `-cloudevents`,
@@ -138,6 +123,32 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   board tools on ordinary cards. Upgrading a token row to a source keeps that token
   and drops only the claim token. A source row still refuses a claim token
   (`fleet bridge set KEY --mcp-token spa_…`). Migration 0134 relaxes the CHECK.
+
+## v0.1.131 — 2026-11-22
+
+No changelog entries were written for this release; its changes are listed in its
+release notes.
+
+## v0.1.130 — 2026-11-17
+
+### Added
+
+- Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
+  delivers the worker's task to the payload only as SuperBench finite stdin and
+  reads its framed result from sealed stdout, then reads the run's receipt back
+  and releases the lease. Lost replies recover through the receipt with the same
+  request ID; nothing is resent. Off unless both the coordinator registry flag
+  and the profile opt in. See `docs/BENCH_REGISTERED_LAUNCH.md`.
+- The coordinator wire can refuse with `capacity_exhausted`; the hub reports it
+  by name on the parked attempt and never re-sends prepare or execute.
+
+- The private bench worker has an explicit `hermes-v1` adapter for bounded prompt
+  input and binding-matched task results. It requires a separately prepared
+  payload-owned Hermes home, executable, provider and model. No dispatcher enables
+  it by default; installed access, provider readiness and the producer crossing
+  remain separate verification requirements.
+
+### Fixed
 
 - Recognize the proposed SuperBench logical-capacity refusal only for ordinary
   operations at HTTP 422, preserving its bounded diagnostic without redispatch.
