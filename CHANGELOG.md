@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.132 — 2026-11-23
+
 ### Fixed
 
 - A SuperPipeline decision event for a board this hub will never carry (on no
@@ -17,8 +19,6 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   answered `200 {"status":"ignored"}` on both doors instead of 503, so the relay
   no longer spends ten retries on it. A rostered board with no dispatch yet is
   still 503.
-
-## v0.1.132 — 2026-11-23
 
 ### Added
 
