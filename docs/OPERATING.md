@@ -1591,9 +1591,10 @@ mounted only when a Matrix bridge is configured: `POST /public/bridge/superpipel
 below) and `POST /public/bridge/superpipeline/events` (the event relay, below). The first two are
 signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_SECRET`; each answers
 503 when its secret is unset. All three verify `x-treaty-signature` (timestamp, `ce-id` and body, a
-300 s window). The first two still accept a board's older `X-Superpipeline-Signature` (body only), but
-only when no `x-treaty-signature` is sent; `push rejected: bad x-treaty-signature` in the log is a
-delivery whose new signature failed. All three answer by the suite's receiver status contract:
+300 s window), and only that: a board's older `X-Superpipeline-Signature` (body only), which
+SuperPipeline stopped sending in v0.0.37, is refused as unsigned (401).
+`push rejected: bad x-treaty-signature` in the log is a delivery whose signature failed. All three
+answer by the suite's receiver status contract:
 2xx handled or permanently ignored (an event this hub does not take, a board whose chat has moved,
 a board no roster row or dispatch here knows, such as one SuperExchange carries:
 `{"ok":true,"status":"ignored"}`); **503** for a rostered board this hub has not mapped to a tenant

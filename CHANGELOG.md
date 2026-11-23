@@ -10,6 +10,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Changed
+
+- The push doors (`/public/bridge/superpipeline/push` and `/work`) accept only the
+  suite's `x-treaty-signature`. The older `X-Superpipeline-Signature` fallback is
+  gone: a push carrying only it is refused (401). SuperPipeline stops sending it in
+  v0.0.37; release this only once that version is live.
+
 ## v0.1.132 — 2026-11-23
 
 ### Fixed

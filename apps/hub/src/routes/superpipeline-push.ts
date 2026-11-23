@@ -13,12 +13,11 @@
  * (treaty `signDelivery`; the relay signs the same way). The push now arrives in CloudEvents
  * binary mode with the event's id in `ce-id`, so the signature binds the id and bounds a replay.
  *
- * Until SuperPipeline's cleanup change, a board also sends its older signature,
- * `X-Superpipeline-Signature: sha256=<hex>` over the bytes alone, and a board that predates the
- * move sends only that. It is accepted only when `x-treaty-signature` is absent: a delivery that
- * carries the new header must verify under it, so stripping a bad new signature cannot fall back
- * to the weaker one. Either way the bytes are read once and verified before being parsed, because
- * a signature over a re-serialized object is a signature over something the sender never sent.
+ * It is the only signature accepted. SuperPipeline's older `X-Superpipeline-Signature` (an HMAC
+ * over the bytes alone, with no id and no timestamp) stopped being sent in its v0.0.37, and a push
+ * carrying only that header is now refused as unsigned. The bytes are read once and verified before
+ * being parsed, because a signature over a re-serialized object is a signature over something the
+ * sender never sent.
  *
  * Fails closed with no configured secret: an unset secret must never mean
  * "accept anything", which is the shape of the mistake that makes a webhook a
@@ -43,38 +42,11 @@ export interface SuperpipelinePushDeps extends DecisionDeps {
   now?(): number;
 }
 
-const enc = new TextEncoder();
-
-/** The older signature: `sha256=<hex>` over the bytes alone, with no id and no timestamp. */
-async function legacySignatureMatches(secret: string, bytes: Uint8Array, header: string): Promise<boolean> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const mac = await crypto.subtle.sign("HMAC", key, bytes);
-  const expected = `sha256=${[...new Uint8Array(mac)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")}`;
-  if (expected.length !== header.length) return false;
-  // Constant time: a length-independent early return leaks the prefix, which is
-  // enough to forge a signature one nibble at a time.
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ header.charCodeAt(i);
-  }
-  return diff === 0;
-}
-
 /**
  * A signed delivery's parsed body, or the refusal to send instead. Fails closed with no secret;
  * reads the bytes once, verifies those, and only then parses them.
  *
- * `eventId` is the delivery's `ce-id`, and only when `x-treaty-signature` vouched for it: the old
- * signature does not cover the id, so an id beside it is not believed (a replayed body under a
- * made-up id could otherwise claim an event before it arrives).
+ * `eventId` is the delivery's `ce-id`, which `x-treaty-signature` vouches for; null when it is empty.
  */
 async function signedBody(
   secret: string | undefined,
@@ -86,23 +58,16 @@ async function signedBody(
     return { refusal: c.json({ error: "not configured" }, 503) };
   }
   const treatySignature = c.req.header(SIGNATURE_HEADER);
-  const legacySignature = c.req.header("X-Superpipeline-Signature");
-  if (treatySignature === undefined && !legacySignature) return { refusal: c.json({ error: "unsigned" }, 401) };
+  if (treatySignature === undefined) return { refusal: c.json({ error: "unsigned" }, 401) };
   const bytes = new Uint8Array(await c.req.arrayBuffer());
-  let eventId: string | null = null;
-  if (treatySignature !== undefined) {
-    const id = c.req.header("ce-id") ?? "";
-    try {
-      await verifyDelivery(secret, treatySignature, id, bytes, { nowMs });
-    } catch {
-      log.warn("push rejected: bad x-treaty-signature", { id, bytes: bytes.length });
-      return { refusal: c.json({ error: "bad signature" }, 401) };
-    }
-    eventId = id === "" ? null : id;
-  } else if (!(await legacySignatureMatches(secret, bytes, legacySignature ?? ""))) {
-    log.warn("push rejected: bad signature", { bytes: bytes.length });
+  const id = c.req.header("ce-id") ?? "";
+  try {
+    await verifyDelivery(secret, treatySignature, id, bytes, { nowMs });
+  } catch {
+    log.warn("push rejected: bad x-treaty-signature", { id, bytes: bytes.length });
     return { refusal: c.json({ error: "bad signature" }, 401) };
   }
+  const eventId = id === "" ? null : id;
   try {
     return { body: JSON.parse(new TextDecoder().decode(bytes)), eventId };
   } catch {

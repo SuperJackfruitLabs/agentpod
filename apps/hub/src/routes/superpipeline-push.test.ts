@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { SIGNATURE_HEADER, signDelivery } from "@superjackfruitlabs/treaty-cloudevents";
 
 import { createSuperpipelinePushRoutes, type SuperpipelinePushDeps } from "./superpipeline-push";
 
@@ -25,13 +26,9 @@ const DELIVERY = {
   ts: "2026-08-30T00:00:00.000Z",
 };
 
+/** The suite's delivery signature, `x-treaty-signature`, over `<t>.<ce-id>.<body>` (no `ce-id` here). */
 async function sign(secret: string, raw: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-  );
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(raw));
-  return `sha256=${[...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return signDelivery(secret, "", new TextEncoder().encode(raw));
 }
 
 function deps(over: Partial<SuperpipelinePushDeps> = {}): SuperpipelinePushDeps & { projected: unknown[] } {
@@ -59,7 +56,7 @@ async function post(d: SuperpipelinePushDeps, raw: string, signature?: string) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(signature ? { "X-Superpipeline-Signature": signature } : {}),
+      ...(signature ? { [SIGNATURE_HEADER]: signature } : {}),
     },
     body: raw,
   });
@@ -676,7 +673,7 @@ describe("a board whose chat has moved", () => {
 async function postWork(d: SuperpipelinePushDeps, raw: string, signature?: string) {
   return createSuperpipelinePushRoutes(d).request("/bridge/superpipeline/work", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(signature ? { "X-Superpipeline-Signature": signature } : {}) },
+    headers: { "Content-Type": "application/json", ...(signature ? { [SIGNATURE_HEADER]: signature } : {}) },
     body: raw,
   });
 }

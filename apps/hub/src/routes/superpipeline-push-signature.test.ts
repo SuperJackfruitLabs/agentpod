@@ -8,8 +8,8 @@ import { createSuperpipelinePushRoutes, type SuperpipelinePushDeps } from "./sup
  * The direct push on the relay's envelope (treaty phase 2, ruling 1): every delivery is signed with
  * `x-treaty-signature` over `<t>.<ce-id>.<body>`, the push config's token as the secret. Held to
  * treaty's own vectors (`fixtures/cloudevents/push-delivery.json`): each delivery verifies at the
- * second it was signed, and each refusal is refused. The older `X-Superpipeline-Signature` is the
- * fallback until SuperPipeline's cleanup change, and only when the new header is absent.
+ * second it was signed, and each refusal is refused. The older `X-Superpipeline-Signature` is no
+ * longer accepted: SuperPipeline stopped sending it in v0.0.37, and a push carrying only it is refused.
  */
 
 interface Vector {
@@ -100,9 +100,25 @@ describe("the signature the push carries", () => {
     expect((await send(deps(work.secret, work.t), headers, work.http.body)).status).toBe(401);
   });
 
-  test("a board that predates the move, with only the old signature, is still accepted", async () => {
-    const headers = { "content-type": "application/json", "X-Superpipeline-Signature": await legacy(work.secret, work.http.body) };
-    expect((await send(deps(work.secret, work.t), headers, work.http.body)).status).toBe(200);
+  test("a push carrying only the old signature is refused, on either door", async () => {
+    const gate = corpus.deliveries.find((v) => v.name !== "work.available");
+    if (!gate) throw new Error("treaty's corpus lost its chat-door vector");
+    for (const v of [work, gate]) {
+      const woken: string[] = [];
+      const headers = { "content-type": "application/json", "X-Superpipeline-Signature": await legacy(v.secret, v.http.body) };
+      const res = await send(deps(v.secret, v.t, { wakeBoard: (b) => (woken.push(b), 1) }), headers, v.http.body);
+      expect(res.status).toBe(401);
+      expect(woken).toEqual([]);
+    }
+  });
+
+  test("the old signature beside a ce-id is refused too: it never vouched for the id", async () => {
+    const headers = {
+      "content-type": "application/json",
+      "ce-id": work.http.headers["ce-id"] ?? "brd_134a0ddb6d434478:1",
+      "X-Superpipeline-Signature": await legacy(work.secret, work.http.body),
+    };
+    expect((await send(deps(work.secret, work.t), headers, work.http.body)).status).toBe(401);
   });
 
   test("a delivery with neither signature is refused", async () => {
