@@ -47,6 +47,9 @@ function checked(row: CheckpointDispatchRow): RetainedCheckpointAttempt {
   return { row, profile, claim, request };
 }
 
+/** A ledger row checked against everything it binds; throws `CheckpointRefused` on any mismatch. */
+export const checkedCheckpointAttempt = checked;
+
 export async function readCheckpointAttempt(tenantId: string, attemptId: string): Promise<RetainedCheckpointAttempt | undefined> {
   const [row] = await db.select().from(checkpointDispatches).where(and(
     eq(checkpointDispatches.tenantId, tenantId), eq(checkpointDispatches.attemptId, attemptId)));

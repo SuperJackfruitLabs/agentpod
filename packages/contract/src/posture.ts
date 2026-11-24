@@ -74,7 +74,7 @@ export type PostureReport = z.infer<typeof PostureReport>;
 // coordinator registry can be written from the hub (fleet bench stage, fleet bench doctor).
 // A capability missing here is filtered out of every hello frame, and the hub then treats every
 // node as one that predates it; node-capabilities.test.ts reads the node's sources to catch that.
-// "bench.reclaim": the node answers `bench.reclaim`, so the hub can reclaim a settled card's bench.
+// "bench.reclaim": the node answers `bench.reclaim`, so the hub can clear a done, cancelled or dormant card's bench.
 export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports", "mcp.proxy", "mcp.proxy.manage",
   "bench.registry.manage", "bench.reclaim"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;

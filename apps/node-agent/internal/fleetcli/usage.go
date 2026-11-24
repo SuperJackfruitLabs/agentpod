@@ -57,8 +57,9 @@ card chooses a subset of it, and its bench holds only those; --default-repo is
 what a card that names none gets. add, set and doctor print the stage's policy
 under the SuperPipeline stage field it goes in: checkpointPolicy, or
 cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
-"stage set NAME --board B". A settled card's bench is reclaimed unless the
-stage is set --keep-bench.`
+"stage set NAME --board B". A card's bench is kept from stage to stage and
+cleared once the card is done, cancelled or dormant; the hub never clears the
+benches of a stage set --keep-bench.`
 
 const ConfigUsage = `usage:
   fleet config settings                                         every setting the fleet can declare

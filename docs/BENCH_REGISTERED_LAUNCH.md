@@ -186,30 +186,54 @@ The routes behind the verbs, all under the admin guard:
 | `DELETE /api/admin/bench/stages/:name` | `fleet bench stage rm` |
 | `GET /api/admin/bench/doctor` | `fleet bench doctor` (`?stage=` or `?station=`) |
 
-### A settled card's bench is reclaimed
+### When a card's bench is cleared
 
-Once the Hub has a card's settlement accepted (its work pushed to `card/<id>` and
-the receipt recorded, phase `reported`), it asks the card's Node to reclaim that
-card's bench, `bench.reclaim` (Node capability `bench.reclaim`). Without it a
-settled bench stays `ready` with its whole quota reserved until SuperBench's idle
-sweep, and a host fills after a few cards (`capacity_exhausted`).
+One card keeps one bench, handed from stage to stage and across review bounces,
+so the next agent on the card finds it warm. A settlement clears nothing. Every
+five minutes the Hub reads each benched card through its latest run (`GET
+runs/:id`, which returns the card as it is now, on the run scope every station
+already holds) and, when the card is one of these, asks each Node the card used
+to reclaim the card's bench (`bench.reclaim`, Node capability `bench.reclaim`):
 
-- **Per stage, on by default.** `fleet bench stage set NAME --keep-bench` keeps
-  settled benches for that stage; `--keep-bench=false` reclaims again. `fleet
-  bench stage list` shows `keepBench`. A stage served only from the profile file
-  reclaims.
-- **Only a settled bench.** The Hub skips a card that has another unsettled
-  attempt. The Node derives the bench key from the card exactly as a prepare does,
-  and under the bench's journal lock refuses (`unsettled`) while any attempt owns
-  the bench or is not terminal; it reads the bench first and refuses a held lease
-  (`lease_held`) or a bench that is not `ready` (`not_ready`). SuperBench refuses
-  the same itself (`409`). Only the registered launch reclaims (`unsupported`
-  otherwise).
+- **Done.** The card is `completed`. A card that arrives at a last stage nobody
+  can act on is resolved `completed` by the board on arrival, so that is this case.
+- **Terminal.** The card is `rejected` or `failed`. A last stage that still has
+  work (a run to do, a review or checks to pass) is not terminal: the card can
+  still bounce, so its bench stays.
+- **Cancelled.** The card is `canceled` or archived, or the board answers `404
+  RUN_NOT_FOUND` or `CARD_NOT_FOUND` for its run (a deleted card's runs go with it).
+- **Dormant.** Neither the card nor any of its attempts changed for
+  `BENCH_DORMANT_AFTER_HOURS` (in `hub.env`; whole hours, default 72, `0` turns
+  dormancy off). A card the Hub cannot read counts its attempts' age alone.
+
+The rules:
+
+- **Never under work.** A card with any attempt not yet `reported`, `retired` or
+  `failed` is skipped, and the board is not read. The Node derives the bench key
+  from the card exactly as a prepare does, and under the bench's journal lock
+  refuses (`unsettled`) while any attempt owns the bench or is not terminal; it
+  reads the bench first and refuses a held lease (`lease_held`) or a bench that is
+  not `ready` (`not_ready`). SuperBench refuses the same itself (`409`). Only the
+  registered launch reclaims (`unsupported` otherwise).
 - **Best effort.** A refusal, a timeout or an offline Node only logs (info for a
-  kept bench, warn otherwise); the card stays reported. A reclaim missed this way
-  is left to SuperBench's idle sweep.
-- **A card that comes back** (a review bounce) finds its key reclaimed and gets a
-  fresh bench prepared from its card branch: a prepare creates over a reclaimed key.
+  kept bench, warn otherwise) and records nothing, so the next sweep asks again.
+  A dormant card no Node would clear for 30 days is recorded `abandoned` and left
+  to SuperBench's idle sweep. Each cleared attempt is recorded in
+  `bench_clearances` (migration 0138) with why (`completed`, `terminal`,
+  `cancelled`, `dormant`), so it is judged once; a card that comes back after that
+  has a new attempt and is judged afresh, and gets a fresh bench from its card
+  branch, because a prepare creates over a reclaimed key.
+- **`--keep-bench`.** `fleet bench stage set NAME --keep-bench` means the Hub never
+  clears that stage's benches, whatever becomes of the card; `--keep-bench=false`
+  returns to the default. `fleet bench stage list` shows `keepBench`. A stage
+  served only from the profile file is cleared.
+- **SuperBench's own idle sweep** (`fresh_reclaim_idle_hours` in benchd's
+  `activation.json`) reclaims a released bench by the time since its last lease
+  release, knowing nothing of cards. It is the backstop for a Hub that is down or
+  a card it can no longer read. Set it above `BENCH_DORMANT_AFTER_HOURS`: a grace
+  shorter than a review clears the warm bench before the card comes back.
+- **Capacity.** Benches now live as long as their cards, one per card active
+  within the dormancy limit. Size the host's quota for that, or lower the limit.
 - **Host step:** `reclaim` is a SuperBench operator operation, so the Node's user
   must be in benchd's `--operator-uids`. Otherwise every reclaim is refused
   (`forbidden`) and only logged.
@@ -371,7 +395,8 @@ concept and `bench workspace` reference):
    workspace checkpoint` and `bench workspace release` with the same token.
    Releasing twice can fail once the first cleared the lease.
 5. Optionally `bench workspace reclaim <key>` to delete the released tree (the
-   Hub does this itself for a settled card unless its stage is `--keep-bench`).
+   Hub does this itself once the card is done, cancelled or dormant, unless its
+   stage is `--keep-bench`).
    The next attempt on the card creates the bench again.
 
 The node's next release for that record then finds the lease gone and ends the

@@ -13,6 +13,7 @@ import { probeSalaamWork } from "./salaam-dispatch";
  * constructs nothing here and behaves exactly as it does today.
  */
 
+import { startBenchClearing } from "./bench-clearing";
 import * as acpSessions from "../acp";
 import { BRIDGE_SOURCE, isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
 import { loopKey, reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
@@ -355,6 +356,8 @@ export async function startSuperpipelineBridge(
     /** Test seam: the roster to reconcile against, in place of the table. */
     roster?: () => Promise<BridgeAgentSecrets[]>;
     reconcileMs?: number;
+    /** Test seam: false starts no bench clearing sweep (bench-clearing.ts). */
+    benchClearing?: false;
   } = {},
 ): Promise<BridgeHandle | null> {
   if (!isBridgeEnabled()) return null;
@@ -479,6 +482,8 @@ export async function startSuperpipelineBridge(
 
   await tick();
   const timer = setInterval(() => void tick(), deps.reconcileMs ?? RECONCILE_MS);
+  // A card's bench is kept from stage to stage and cleared once the card is done, cancelled or dormant.
+  const clearing = deps.benchClearing === false ? undefined : startBenchClearing();
 
   return {
     get agents() {
@@ -486,6 +491,7 @@ export async function startSuperpipelineBridge(
     },
     async stop() {
       clearInterval(timer);
+      clearing?.stop();
       await Promise.all([...live.values()].map((l) => l.handle.stop()));
       live.clear();
     },

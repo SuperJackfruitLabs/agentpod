@@ -10,6 +10,7 @@ export const CHECKPOINT_PATH = [
   "services/bridge/checkpoint-current-decision.ts", "services/bridge/checkpoint-profiles.ts",
   "services/bridge/checkpoint-ledger.ts", "services/bridge/checkpoint-log.ts", "services/broker/broker.ts",
   "services/bridge/checkpoint-activity.ts", "services/bridge/checkpoint-run-ended.ts", "services/bridge/checkpoint-reclaim.ts",
+  "services/bridge/bench-clearing.ts",
 ];
 
 /** A call that says something: the checkpoint log, a refusal log handed the error, a quiet or plain log. */

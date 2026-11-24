@@ -83,7 +83,7 @@ func fleetBenchStage(args []string) {
 	launch := fs.String("launch", "", "registered-v1 (default) or grouped")
 	repin := fs.Bool("repin", false, "re-pin the node registry's worker and coordinator digests to the installed bytes")
 	refresh := fs.Bool("refresh", false, "re-derive the hub's pins and the node's target, changing nothing else (set)")
-	keepBench := fs.Bool("keep-bench", false, "keep a card's bench after its checkpoint settles; --keep-bench=false reclaims again (the default)")
+	keepBench := fs.Bool("keep-bench", false, "never clear this stage's benches, even once a card is done, cancelled or dormant; --keep-bench=false clears them again (the default)")
 	cardsChoose := fs.Bool("cards-choose", false, "each card chooses its repositories from --repo, the allow-list (set: --cards-choose=false turns it off)")
 	noDefault := fs.Bool("no-default-repo", false, "remove the stage's default repositories (set)")
 	var repos, workerArgs, env, defaults repeatable

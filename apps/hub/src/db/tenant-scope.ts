@@ -40,6 +40,7 @@ import { matrixBoardRooms } from "./schema/board-rooms";
 import { bridgeAgents, bridgeBoardSettings, bridgeDispatches } from "./schema/bridge";
 import { checkpointDispatches } from "./schema/checkpoint-dispatch";
 import { benchStages } from "./schema/bench-stages";
+import { benchClearances } from "./schema/bench-clearances";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import {
@@ -162,6 +163,7 @@ export const TENANT_SCOPED_TABLES = {
   bridgeDispatches,
   checkpointDispatches,
   benchStages,
+  benchClearances,
   agentTasks,
   cloudflareSandboxes,
   matrixRooms,

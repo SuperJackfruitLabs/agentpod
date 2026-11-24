@@ -355,7 +355,7 @@ describe("a stage set up from the hub", () => {
     expect(await next.port.current(after)).toBe(true);
   });
 
-  test("a stage reclaims settled benches unless set to --keep-bench, and a re-pin keeps the choice", async () => {
+  test("a stage's benches are cleared by the hub unless it is set --keep-bench, and a re-pin keeps the choice", async () => {
     const List = z.object({ stages: z.array(BenchStageView) });
     const keep = async () => List.parse(await (await call("GET", "/stages")).json()).stages.find((st) => st.name === "review")?.keepBench;
     // The reply's `changed` names the flip, as it names a pin: it answered `changed: {}`.

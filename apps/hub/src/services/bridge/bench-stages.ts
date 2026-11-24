@@ -332,7 +332,7 @@ function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProf
 async function finish(userId: string, tenantId: string, name: string, profile: CheckpointProfile, stageId: string | null,
   status: BenchRegistryStatus, created: boolean, rosterKey: string, before?: CheckpointProfile,
   keepBench?: boolean): Promise<StageResult> {
-  // Read before the write: a stage with no row yet (one adopted from the profile file) reclaims, the default.
+  // Read before the write: a stage with no row yet (one adopted from the profile file) is cleared, the default.
   const keptBefore = (await readStage(tenantId, name))?.row.keepBench ?? false;
   await upsertStage({ tenantId, name, profile, stageId, origin: "fleet", createdBy: userId, ...(keepBench === undefined ? {} : { keepBench }) });
   const kept = (await readStage(tenantId, name))?.row.keepBench ?? false;

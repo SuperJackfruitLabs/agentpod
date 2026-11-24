@@ -238,9 +238,9 @@ var adminCommands = []clidoc.Command{
 			"roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its " +
 			"`--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by " +
 			"the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. " +
-			"Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; " +
-			"a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for " +
-			"this stage instead, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin " +
+			"A card keeps its bench from stage to stage and across review bounces; the hub clears it (its tree and quota) " +
+			"once the card is done, cancelled or dormant (`BENCH_DORMANT_AFTER_HOURS`, 72 by default). `--keep-bench` " +
+			"means the hub never clears this stage's benches, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin " +
 			"the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is " +
 			"printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name"}},

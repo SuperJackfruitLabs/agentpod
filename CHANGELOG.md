@@ -12,6 +12,16 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Added
 
+- A card's bench is cleared once the card is done, terminal, cancelled or dormant.
+  Every five minutes the hub reads each benched card through its latest run and,
+  when the card is `completed`, `rejected` or `failed`, `canceled`, archived or
+  deleted, or neither it nor its attempts changed for `BENCH_DORMANT_AFTER_HOURS`
+  (default 72, `0` turns dormancy off), asks each node the card used to reclaim its
+  bench. Never for a card with an attempt in progress, a held lease or an
+  unsettled journal; a failed reclaim only logs and is asked again next sweep.
+  Migration 0138 adds `bench_clearances`. SuperBench's own idle grace
+  (`fresh_reclaim_idle_hours`) should be set above the hub's dormancy limit, or it
+  clears warm benches first.
 - The node manages Hermes's `agent.reasoning_effort` as a reconcilable setting
   (`hermes.agent.reasoning_effort`, per profile, restart to take effect), so a station can be
   told to reason, and with `hermes.plugins.stream_reasoning_deltas` to stream its thought
@@ -27,6 +37,11 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Changed
 
+- A settled card keeps its bench. The hub no longer asks the node to reclaim a
+  card's bench once its checkpoint settles: one card keeps one bench from stage to
+  stage and across review bounces, so the next agent finds it warm.
+- `fleet bench stage set NAME --keep-bench` now means the hub never clears that
+  stage's benches, even once a card is done, cancelled or dormant.
 - With the suite's event relay configured (`TREATY_RELAY_DELIVERY_SECRET`), a board's push config
   subscribes none of the eleven decision events: the relay delivers them all, so the push no
   longer duplicates them. Each board's config is re-registered with an empty list within five
