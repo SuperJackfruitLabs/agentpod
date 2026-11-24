@@ -4,20 +4,25 @@
     "": {
       "name": "@agentpod/contract",
       "dependencies": {
-        "@superjackfruitlabs/treaty-matrix-events": "0.0.18",
+        "@superjackfruitlabs/treaty-matrix-events": "0.0.19",
         "zod": "^4.6.5",
       },
       "devDependencies": {
-        "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.18",
+        "@superjackfruitlabs/treaty-contracts": "0.0.19",
+        "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.19",
         "@types/bun": "latest",
         "typescript": "~5.9.3",
       },
     },
   },
   "packages": {
-    "@superjackfruitlabs/treaty-ecosystem-identity": ["@superjackfruitlabs/treaty-ecosystem-identity@0.0.18", "", { "dependencies": { "jose": "6.2.12" } }, "sha512-jD0B3oSVtDBL3RDCqr+1N2o7rsp3O5eZoHU8m4iilbcl8wRCeALVWSd6KK2OrqhPuYqd4GfssKHdIKJOTg9oTw=="],
+    "@cfworker/json-schema": ["@cfworker/json-schema@4.1.1", "", {}, "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og=="],
 
-    "@superjackfruitlabs/treaty-matrix-events": ["@superjackfruitlabs/treaty-matrix-events@0.0.18", "", {}, "sha512-C+UbakPEDpfI/yZ/cb7+12fuc6wG3XD5+3pmA1Tai6AsoGQZUzfdDtxcpusmhn4mlu0Mi0mqGC/FTnpysn7kCw=="],
+    "@superjackfruitlabs/treaty-contracts": ["@superjackfruitlabs/treaty-contracts@0.0.19", "", { "dependencies": { "@cfworker/json-schema": "4.1.1" }, "bin": { "treaty": "dist/cli.js" } }, "sha512-05trkBfP2PgXOCeiJZ+l9mvDVdfLF9H8W0JWm+ZfObIWm5lsCTnh6RpS3/4tkDrmm46LpRxQrlhcakvHgu/qIQ=="],
+
+    "@superjackfruitlabs/treaty-ecosystem-identity": ["@superjackfruitlabs/treaty-ecosystem-identity@0.0.19", "", { "dependencies": { "jose": "6.2.12" } }, "sha512-Ji5NFEhJeSz7I3s4jciaDV1pR2CCyAGcrJY6lGrIMPH2BYUDYO8UDPjqBRM3Zpt8rK76A7ChvjtXNc05FvjrHQ=="],
+
+    "@superjackfruitlabs/treaty-matrix-events": ["@superjackfruitlabs/treaty-matrix-events@0.0.19", "", {}, "sha512-St/FIzADEoOK/gTnKhJdWjgPRT7Y8IVaOPJlNh+4Mwd7LOX6eVmoHp8OalcJge2voiEqrx3cCj49V7uoPE00UQ=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
