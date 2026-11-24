@@ -2911,8 +2911,9 @@ card chooses a subset of it, and its bench holds only those; --default-repo is
 what a card that names none gets. add, set and doctor print the stage's policy
 under the SuperPipeline stage field it goes in: checkpointPolicy, or
 cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
-"stage set NAME --board B". A settled card's bench is reclaimed unless the
-stage is set --keep-bench.
+"stage set NAME --board B". A card's bench is kept from stage to stage and
+cleared once the card is done, cancelled or dormant; the hub never clears the
+benches of a stage set --keep-bench.
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2988,7 +2989,7 @@ In order, each step idempotent and each refusal naming the step: the station's r
 | `--stage-id ID` | string | — | The SuperPipeline stage it serves, named in the printed policy's next step. |
 | `--bridge-key K` | string | — | Roster key for the stage's bridge row (add). |
 | `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
-| `--keep-bench` | bool | `false` | Keep a card's bench after its checkpoint settles; `--keep-bench`=false reclaims again (the default). |
+| `--keep-bench` | bool | `false` | Never clear this stage's benches, even once a card is done, cancelled or dormant; `--keep-bench`=false clears them again (the default). |
 | `--cards-choose` | bool | `false` | Each card chooses its repositories from `--repo`, the allow-list (set: `--cards-choose`=false turns it off). |
 | `--default-repo N` | string | — | With `--cards-choose`: a repository a card that names none gets (repeatable). |
 
@@ -3011,7 +3012,7 @@ fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkp
                      [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
 ```
 
-Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for this stage instead, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.
+Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. A card keeps its bench from stage to stage and across review bounces; the hub clears it (its tree and quota) once the card is done, cancelled or dormant (`BENCH_DORMANT_AFTER_HOURS`, 72 by default). `--keep-bench` means the hub never clears this stage's benches, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.
 
 | Argument | Meaning |
 |---|---|
@@ -3027,7 +3028,7 @@ Fields not given keep their value on the node and in the hub. `--board` moves th
 | `--worker PATH` | string | — | Absolute path of the worker command on the bench host. |
 | `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
 | `--refresh` | bool | `false` | Re-derive the hub's pins and the node's target, changing nothing else (set). |
-| `--keep-bench` | bool | `false` | Keep a card's bench after its checkpoint settles; `--keep-bench`=false reclaims again (the default). |
+| `--keep-bench` | bool | `false` | Never clear this stage's benches, even once a card is done, cancelled or dormant; `--keep-bench`=false clears them again (the default). |
 | `--cards-choose` | bool | `false` | Each card chooses its repositories from `--repo`, the allow-list (set: `--cards-choose`=false turns it off). |
 | `--default-repo N` | string | — | With `--cards-choose`: a repository a card that names none gets (repeatable). |
 | `--no-default-repo` | bool | `false` | Remove the stage's default repositories (set). |

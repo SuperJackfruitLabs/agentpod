@@ -23,7 +23,7 @@ export const benchStages = pgTable("bench_stages", {
   /** The SuperPipeline stage this serves, when given: only used to name it in the printed policy's next step. */
   stageId: text("stage_id"),
   origin: text("origin").notNull(),
-  /** Keep a card's bench after its checkpoint settles (`--keep-bench`); off means it is reclaimed. */
+  /** The hub never clears this stage's benches (`--keep-bench`); off, a card's bench is cleared once the card is done, cancelled or dormant. */
   keepBench: boolean("keep_bench").notNull().default(false),
   profile: text("profile").notNull(),
   createdBy: text("created_by"),

@@ -160,7 +160,7 @@ export const BenchStageView = z.object({
   cardsChoose: z.boolean(),
   defaultRepositories: z.array(z.string()).optional(),
   registrySHA256: sha,
-  /** Whether a settled card's bench is kept (`--keep-bench`) rather than reclaimed. */
+  /** Whether the hub never clears this stage's benches (`--keep-bench`), even once a card is done, cancelled or dormant. */
   keepBench: z.boolean(),
   served: BenchStageServed,
   /** For `drifted`: the target fields that differ. For `unknown`: why the node was not asked. */
@@ -179,7 +179,7 @@ export const BenchDoctorCheck = z.object({
 });
 export type BenchDoctorCheck = z.infer<typeof BenchDoctorCheck>;
 
-/** `bench.reclaim`: the hub asks the node to reclaim one settled card's bench (Go `benchbridge.ReclaimRequest`). */
+/** `bench.reclaim`: the hub asks the node to reclaim one card's bench once the card is done, cancelled or dormant (Go `benchbridge.ReclaimRequest`). */
 export const BenchReclaimRequest = z.object({
   tenant_id: z.string(), board_id: z.string(), station_id: z.string(), card_id: z.string(),
 }).strict();
