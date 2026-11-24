@@ -27,6 +27,9 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Changed
 
+- A settled card keeps its bench. The hub no longer asks the node to reclaim a
+  card's bench once its checkpoint settles: one card keeps one bench from stage to
+  stage and across review bounces, so the next agent finds it warm.
 - With the suite's event relay configured (`TREATY_RELAY_DELIVERY_SECRET`), a board's push config
   subscribes none of the eleven decision events: the relay delivers them all, so the push no
   longer duplicates them. Each board's config is re-registered with an empty list within five

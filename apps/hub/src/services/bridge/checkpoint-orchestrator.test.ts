@@ -10,7 +10,7 @@ import { TEST_PLANE } from "../../auth/org-plane/config";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { CHECKPOINT_RUNNING_RECHECK_MS, driveCheckpointAttempt, endEndedRun, RUN_ENDED_GRACE_MS, setParkedLogForTests,
+import { CHECKPOINT_RUNNING_RECHECK_MS, checkpointDriveDeps, driveCheckpointAttempt, endEndedRun, RUN_ENDED_GRACE_MS, setParkedLogForTests,
   type CheckpointDriveDeps } from "./checkpoint-orchestrator";
 import { endedRunView, movedRunView, runView } from "./checkpoint-run-view.test-fixture";
 import { CheckpointClaimRefused, validateCheckpointContext } from "./checkpoint-claim";
@@ -942,32 +942,20 @@ const settledReceipt: CheckpointReceipt = { version: "superpipeline.run-checkpoi
     members: [{ name: "api", provider: "forge", repository: "example/api", branch: "card/card_fixture", objectFormat: "sha1",
       commit: "1".repeat(40) }], checkpointRepository: "api" } };
 
-// Staging: settled cards kept their benches (and 3 GiB of quota each) until the idle sweep, and the
-// fourth card was refused for capacity. The pass that records the settlement asks for the reclaim.
-test("the pass that records a settlement reclaims the card's bench, once, and a failed reclaim changes nothing", async () => {
-  for (const fails of [false, true]) {
-    const { attempt, h } = submissionPending(settledReceipt);
-    const reclaimed: string[] = [];
-    h.deps.advance = async (current, next) => ({ attempt: { ...current, row: { ...current.row, ...next } }, send: false });
-    h.deps.reclaim = async (settled) => {
-      reclaimed.push(`${settled.row.attemptId}:${settled.row.phase}`);
-      if (fails) throw new Error("node offline");
-    };
-    const board = boardWithRun(attempt, () => ({ status: 200, body: runView(attempt.claim) }));
-    await driveCheckpointAttempt(attempt, board.client, false, h.deps);
-    expect(reclaimed).toEqual([`${attempt.row.attemptId}:reported`]);
-  }
-});
-
-test("revert-proof: no reclaim before a settlement is recorded", async () => {
-  const { attempt, h } = submissionPending(undefined);
-  nodeAnswers(h.deps, [refusedStatus("stale_owner")]);
-  retirements(h.deps);
-  const reclaimed: unknown[] = [];
-  h.deps.reclaim = async (settled) => { reclaimed.push(settled); };
-  const board = boardWithRun(attempt, () => ({ status: 200, body: endedRunView(attempt.claim, "reclaimed") }));
-  await driveCheckpointAttempt(attempt, board.client, false, h.deps);
-  expect(reclaimed).toEqual([]);
+// Ruling 2026-11-23: one card keeps one bench from stage to stage and across review bounces. A settlement
+// clears nothing; the card's bench is cleared when the card is done, cancelled or dormant (bench-clearing.ts).
+test("revert-proof: the pass that records a settlement keeps the card's bench: the node is asked nothing more", async () => {
+  expect(Object.keys(checkpointDriveDeps())).not.toContain("reclaim");
+  const { attempt, h } = submissionPending(settledReceipt);
+  const phases: string[] = [];
+  h.deps.advance = async (current, next) => { phases.push(next.phase); return { attempt: { ...current, row: { ...current.row, ...next } }, send: false }; };
+  const verbs: string[] = [];
+  h.deps.request = async (_node, verb) => { verbs.push(verb); return { ok: true, data: {} }; };
+  const merged = checkpointDriveDeps(h.deps);
+  const board = boardWithRun(attempt, () => ({ status: 200, body: runView(attempt.claim) }));
+  await driveCheckpointAttempt(attempt, board.client, false, merged);
+  expect(phases).toEqual(["reported"]);
+  expect(verbs).toEqual([]);
 });
 
 // ─── reclaimSettledBench: what the hub asks the node once a card is settled ──

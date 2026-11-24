@@ -7,7 +7,6 @@ import { createLogger } from "../../utils/logger";
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse,
   BenchCoordinatorCompletion, BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
-import { reclaimSettledBench } from "./checkpoint-reclaim";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON, parseCheckpointContextJSON } from "./checkpoint-json";
 import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, retireCheckpointAttempt,
   type CheckpointFailure, type CheckpointRetirementReason, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
@@ -165,12 +164,10 @@ export interface CheckpointDriveDeps {
   now(): number;
   /** The station's capacity backoff (checkpoint-capacity-backoff.ts). Without one, capacity releases are not counted. */
   capacity?: CapacityBackoff;
-  /** Reclaim the card's bench once its settlement is accepted (checkpoint-reclaim.ts). Never throws. */
-  reclaim?(attempt: RetainedCheckpointAttempt): Promise<unknown>;
 }
 const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
   advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
-  retire: retireCheckpointAttempt, now: Date.now, reclaim: (attempt) => reclaimSettledBench(attempt) };
+  retire: retireCheckpointAttempt, now: Date.now };
 /** The real effects, with a station's own pieces (its capacity backoff) added. */
 export function checkpointDriveDeps(overrides: Partial<CheckpointDriveDeps> = {}): CheckpointDriveDeps {
   return { ...defaultDeps, ...overrides };
@@ -490,9 +487,8 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           if (!receipt) return parked(attempt, "uncertain", new CheckpointRefused("uncertain", "service.receipt.absent"));
           await deps.authority(attempt);
           attempt = (await deps.advance(attempt, { phase: "reported", settlementReceipt: canonicalCheckpoint(receipt) })).attempt;
-          // Settled: the card's work is on card/<id> and accepted, so its bench is no longer needed. Once,
-          // on the pass that recorded the settlement; a failure only logs, and the card stays reported.
-          await deps.reclaim?.(attempt).catch(() => undefined); // silent-catch-ok: reclaimSettledBench logs every outcome and never throws
+          // Settled, and the bench stays: one card keeps one bench from stage to stage and across review
+          // bounces. It is cleared when the card is done, cancelled or dormant (bench-clearing.ts), never here.
           break;
         }
         case "failure_pending": {
