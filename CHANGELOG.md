@@ -20,6 +20,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Changed
 
+- With the suite's event relay configured (`TREATY_RELAY_DELIVERY_SECRET`), a board's push config
+  subscribes none of the eleven decision events: the relay delivers them all, so the push no
+  longer duplicates them. Each board's config is re-registered with an empty list within five
+  minutes of a restart. A hub without a relay keeps getting them by push, and the relay's own
+  `elicitation.pending` config stays. The relay's filter must carry all eleven, as staging's and
+  production's do.
 - The capability catalog (`/api/catalog/*`) and bridge roster (`/api/bridge/*`) refuse with
   snake-case codes (`not_found`, `invalid_station`, `invalid_board`, `invalid_principal`) instead
   of the free-text `not found` and `invalid station` they answered before, as treaty v0.0.19's
