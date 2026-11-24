@@ -39,6 +39,14 @@ var hermesConfigRegistry = []descriptor.ConfigSetting{
 	{ID: "hermes.plugins.enabled", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
 	{ID: "hermes.plugins.stream_reasoning_deltas", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
 	{ID: "hermes.skills.external_dirs", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
+
+	// How hard the agent's model reasons (`agent.reasoning_effort`, a level
+	// name Hermes knows, such as low or high; written as given). Managed so a station can be told to
+	// think, and so stream its thought deltas through the live plugin, without
+	// a hand edit. Hermes reads it when the gateway builds the agent, so a
+	// restart is assumed, as for the rest of this list. A plain scalar: the
+	// generic reconcilable writer, no delegate.
+	{ID: "hermes.agent.reasoning_effort", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
 }
 
 // hermesConfigPath maps a registered setting id to the YAML section and key it
@@ -52,6 +60,8 @@ var hermesConfigPath = map[string][2]string{
 	"hermes.plugins.enabled":                 {"plugins", "enabled"},
 	"hermes.plugins.stream_reasoning_deltas": {"plugins", "stream_reasoning_deltas"},
 	"hermes.skills.external_dirs":            {"skills", "external_dirs"},
+
+	"hermes.agent.reasoning_effort": {"agent", "reasoning_effort"},
 }
 
 func (h *Descriptor) ConfigSettings() []descriptor.ConfigSetting {

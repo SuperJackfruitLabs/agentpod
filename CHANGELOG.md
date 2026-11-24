@@ -10,6 +10,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Added
+
+- The node manages Hermes's `agent.reasoning_effort` as a reconcilable setting
+  (`hermes.agent.reasoning_effort`, per profile, restart to take effect), so a station can be
+  told to reason, and with `hermes.plugins.stream_reasoning_deltas` to stream its thought
+  deltas, through `fleet config` instead of a hand edit. Needs the node at this release.
+
 ### Fixed
 
 - A gate SuperPipeline cancels (its card moved by hand or archived while the review

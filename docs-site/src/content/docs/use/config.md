@@ -133,7 +133,7 @@ lists every setting any reachable node currently manages — the live registry, 
 node, never a copy held in the hub. A node that cannot currently be asked contributes
 nothing to this list, and is named separately so its absence isn't silent.
 
-This registry currently covers seven settings — plus whatever else is live on the node you
+This registry currently covers eight settings — plus whatever else is live on the node you
 ask:
 
 | Setting | Scope | Policy |
@@ -145,14 +145,22 @@ ask:
 | `hermes.plugins.stream_reasoning_deltas` | `profile` | `reconcilable` |
 | `hermes.skills.external_dirs` | `profile` | `additive-only` |
 | `openclaw.hooks.allowConversationAccess` | `user` | `reconcilable` |
+| `hermes.agent.reasoning_effort` | `profile` | `reconcilable` |
 
-The last four are the same four settings the `apn hermes-live`, `apn hermes-skills` and
-`apn openclaw-errors` verbs have always managed. Folding them into this registry did not
-replace those verbs, and does not retire them: **both paths call the exact same writer**, so
-a plan `fleet config` derives for one of these settings and the edit the matching `apn`
-command would make by hand are byte-identical, not merely equivalent. Run `apn hermes-live`,
-`apn hermes-skills`, or `apn openclaw-errors` directly whenever that is more convenient —
-nothing about declaring these through `fleet config` changes what those commands do.
+`hermes.agent.reasoning_effort` is how hard the profile's model reasons (a level name Hermes
+knows, such as `low` or `high`; the node writes the value it is given). Declare it with
+`stream_reasoning_deltas` to have a station stream its thought deltas without editing its
+`config.yaml` by hand; like the rest of the list, it takes effect when the profile's gateway
+restarts.
+
+The four settings from `hermes.plugins.enabled` to `openclaw.hooks.allowConversationAccess` are
+the same four settings the `apn hermes-live`, `apn hermes-skills` and `apn openclaw-errors`
+verbs have always managed. Folding them into this registry did not replace those verbs, and does
+not retire them: **both paths call the exact same writer**, so a plan `fleet config` derives for
+one of these settings and the edit the matching `apn` command would make by hand are
+byte-identical, not merely equivalent. Run `apn hermes-live`, `apn hermes-skills`, or
+`apn openclaw-errors` directly whenever that is more convenient — nothing about declaring these
+through `fleet config` changes what those commands do.
 
 ### Two limits on the plugin settings
 

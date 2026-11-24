@@ -318,3 +318,34 @@ func TestHermesObserveConfigOtherPluginDisabledDoesNotOptOut(t *testing.T) {
 		t.Fatalf("a different plugin in plugins.disabled must not opt this out, got %+v", vals[0])
 	}
 }
+
+// agent.reasoning_effort is managed (treaty phase 3, a phase-2 leftover): a
+// staging station can be told to reason, and so to stream thought deltas,
+// without a hand edit. Reconcilable, one scalar, restart assumed, and not
+// governed by the live plugin's own opt-out.
+func TestHermesManagesReasoningEffort(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "agent:\n  reasoning_effort: low\nplugins:\n  disabled:\n    - agentpod-live\n")
+	var got *descriptor.ConfigSetting
+	for _, s := range h.ConfigSettings() {
+		if s.ID == "hermes.agent.reasoning_effort" {
+			s := s
+			got = &s
+		}
+	}
+	if got == nil {
+		t.Fatal("registry is missing hermes.agent.reasoning_effort")
+	}
+	if got.Policy != "reconcilable" || got.Scope != "profile" || !got.RestartToTakeEffect || got.Harness != "hermes" {
+		t.Fatalf("setting = %+v, want hermes/profile/reconcilable/restart", *got)
+	}
+	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.agent.reasoning_effort"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) != 1 || !vals[0].Readable || vals[0].Observed != "low" {
+		t.Fatalf("got %+v; want one readable low", vals)
+	}
+	if vals[0].OptedOutByHarness {
+		t.Fatal("the live plugin's opt-out does not govern agent.reasoning_effort")
+	}
+}
