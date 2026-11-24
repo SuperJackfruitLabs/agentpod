@@ -37,13 +37,15 @@ import { TEST_PLANE } from "../auth/org-plane/config";
 
 import { createPrincipal } from "../../tests/helpers/principals";
 import { createDispatchableRoutes } from "./fleet-dispatchable";
+import { FLEET, contractChecked } from "../../tests/helpers/agentpod-contract";
 import { forgetPrincipals } from "../../tests/helpers/principals";
 import { suspendPrincipal } from "../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const HANDLE_PREFIX = `dispatchable-it-${RUN}`;
 
-const app = createDispatchableRoutes();
+/** Every answer is held to treaty's fleet.v1 (`contractChecked`): its refusals are RFC 6750's envelope. */
+const app = contractChecked(createDispatchableRoutes(), FLEET);
 
 /** Principal ids created in `beforeAll`, filled in there. */
 let agentA = "";

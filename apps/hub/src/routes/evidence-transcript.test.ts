@@ -17,6 +17,7 @@ import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { setGrant } from "../auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals } from "../../tests/helpers/principals";
 import { createEvidenceRoutes } from "./evidence";
+import { EVIDENCE, contractChecked } from "../../tests/helpers/agentpod-contract";
 
 const RUN = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
 const STATION = `station_${crypto.randomUUID()}`;
@@ -24,7 +25,8 @@ const SESSION = `acps_${crypto.randomUUID()}`;
 const EMPTY = `acps_${crypto.randomUUID()}`;
 const LONG = `acps_${crypto.randomUUID()}`; // more rows than one fold batch
 const STRADDLE = `acps_${crypto.randomUUID()}`; // a key across the 16 KiB cut
-const app = createEvidenceRoutes();
+/** Every answer is held to treaty's evidence.v1 (`contractChecked`). */
+const app = contractChecked(createEvidenceRoutes(), EVIDENCE);
 
 /** Assembled at runtime so no literal credential sits in this file. */
 const SECRET_HEAD = ["sk", "ant", "api03", "AAAAAAAAAA"].join("-");

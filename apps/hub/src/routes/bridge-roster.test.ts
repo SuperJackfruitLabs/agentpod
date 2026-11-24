@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { CAPABILITY_CATALOG, contractChecked } from "../../tests/helpers/agentpod-contract";
 import { boardRosterWithReadiness, createBridgeRosterRoute, type BoardRosterEntry } from "./bridge-roster";
 
 const READER = "prn_0000000000000000c0b3";
@@ -12,8 +13,9 @@ const ENTRY: BoardRosterEntry = {
   ready: true,
   reason: null,
 };
+/** Every answer is held to treaty's capability-catalog.v1 (`contractChecked`). */
 function app(kind = "service", sub = READER, token = true) {
-  return createBridgeRosterRoute({
+  return contractChecked(createBridgeRosterRoute({
     verify: async () =>
       token
         ? ({ ok: true, caller: { sub, principalKind: kind, tenantId: "tnt_1", claims: {} } } as never)
@@ -26,7 +28,7 @@ function app(kind = "service", sub = READER, token = true) {
         ? { id, key: "notes-station", owner: "prn_000000000000000000a1" }
         : null,
     boardRoster: async (tenantId, boardId) => (tenantId === "tnt_1" && boardId === "brd_00000000000000b1" ? [ENTRY] : []),
-  });
+  }), CAPABILITY_CATALOG);
 }
 const get = (a: ReturnType<typeof app>, prn: string, authorization: string | null = "Bearer x.y.z") =>
   a.request(`/api/bridge/principals/${prn}/boards`, { headers: authorization ? { authorization } : {} });

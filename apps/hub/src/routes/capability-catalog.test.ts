@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { CAPABILITY_CATALOG, contractChecked } from "../../tests/helpers/agentpod-contract";
 import { catalogReaders, createCapabilityCatalogRoute } from "./capability-catalog";
 import { CatalogResponse, CatalogStationsResponse, StationCapabilities as StationRow } from "@agentpod/contract";
 import type { CatalogEntry, StationCapabilities } from "../services/catalog";
@@ -23,15 +24,16 @@ const ROW: StationCapabilities = {
   credentials: [],
 };
 
+/** Every answer is held to treaty's capability-catalog.v1 (`contractChecked`). */
 function app(kind: "service" | "human" | "agent" = "service", sub = READER, token = true) {
-  return createCapabilityCatalogRoute({
+  return contractChecked(createCapabilityCatalogRoute({
     verify: async () =>
       token ? { ok: true, caller: { sub, principalKind: kind, tenantId: "tnt_1" } } : { ok: false, status: 401 },
     readers: () => [READER],
     catalog: async (tenantId) => (tenantId === "tnt_1" ? [ENTRY] : []),
     stations: async (tenantId, only) =>
       tenantId === "tnt_1" && (!only || only.includes(ROW.stationId)) ? [ROW] : [],
-  });
+  }), CAPABILITY_CATALOG);
 }
 const get = (a: ReturnType<typeof app>, path: string, authorization: string | null = "Bearer x.y.z") =>
   a.request(path, { headers: authorization ? { authorization } : {} });
