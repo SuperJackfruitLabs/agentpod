@@ -18,7 +18,6 @@ import type { CheckpointServiceClient } from "./checkpoint-service-client";
 import type { CheckpointReceipt } from "./checkpoint-settlement-data";
 import { createQuietLog } from "./quiet-log";
 import { resetCheckpointActivityForTests } from "./checkpoint-activity";
-import { reclaimSettledBench, type ReclaimDeps } from "./checkpoint-reclaim";
 import { NODE_CALL_TIMEOUT_MS } from "./checkpoint-node-call";
 import { capacityCard, createCapacityBackoff, CAPACITY_BACKOFF_BASE_MS, CAPACITY_RELEASE_CAP } from "./checkpoint-capacity-backoff";
 import { parseCheckpointProfile } from "./checkpoint-profile";
@@ -956,46 +955,4 @@ test("revert-proof: the pass that records a settlement keeps the card's bench: t
   await driveCheckpointAttempt(attempt, board.client, false, merged);
   expect(phases).toEqual(["reported"]);
   expect(verbs).toEqual([]);
-});
-
-// ─── reclaimSettledBench: what the hub asks the node once a card is settled ──
-function reclaimFakes(over: Partial<ReclaimDeps> & { reply?: unknown; ok?: boolean } = {}) {
-  const sent: Array<{ nodeId: string; verb: string; params: unknown }> = [];
-  const d: ReclaimDeps = {
-    keepBench: async () => false, unsettledSibling: async () => false, online: () => true,
-    request: async (nodeId, verb, params) => {
-      sent.push({ nodeId, verb, params });
-      return over.ok === false ? { ok: false, error: "timeout" } : { ok: true, data: over.reply ?? { state: "reclaimed", bench_id: "b" } };
-    },
-    ...over,
-  };
-  return { d, sent };
-}
-
-test("a settled card's bench is reclaimed by its own selector and card", async () => {
-  const attempt = executePending();
-  const { d, sent } = reclaimFakes();
-  expect(await reclaimSettledBench(attempt, d)).toBe("reclaimed");
-  const id = attempt.request.identity;
-  expect(sent).toEqual([{ nodeId: attempt.profile.target.node_id, verb: "bench.reclaim",
-    params: { tenant_id: id.tenant_id, board_id: id.board_id, station_id: id.station_id, card_id: id.card_id } }]);
-});
-
-test("a stage that keeps its benches, or a card with another unsettled attempt, asks the node nothing", async () => {
-  for (const [over, outcome] of [[{ keepBench: async () => true }, "kept"], [{ unsettledSibling: async () => true }, "unsettled"]] as const) {
-    const { d, sent } = reclaimFakes(over);
-    expect(await reclaimSettledBench(executePending(), d)).toBe(outcome);
-    expect(sent).toEqual([]);
-  }
-});
-
-test("a refusal, a timeout, an offline node or a failed read only logs; nothing throws", async () => {
-  const warn = spyOn(console, "warn").mockImplementation(() => {});
-  const info = spyOn(console, "log").mockImplementation(() => {});
-  try {
-    expect(await reclaimSettledBench(executePending(), reclaimFakes({ reply: { state: "refused", code: "lease_held" } }).d)).toBe("refused");
-    expect(await reclaimSettledBench(executePending(), reclaimFakes({ ok: false }).d)).toBe("failed");
-    expect(await reclaimSettledBench(executePending(), reclaimFakes({ online: () => false }).d)).toBe("failed");
-    expect(await reclaimSettledBench(executePending(), reclaimFakes({ keepBench: async () => { throw new Error("db down"); } }).d)).toBe("failed");
-  } finally { warn.mockRestore(); info.mockRestore(); }
 });

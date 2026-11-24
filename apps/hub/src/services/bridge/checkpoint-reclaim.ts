@@ -1,13 +1,10 @@
 /**
- * After a card's checkpoint is settled (pushed to `card/<id>` and the settlement accepted), the hub
- * asks the node to reclaim that card's bench. A settled bench otherwise stays `ready` with its whole
- * quota reserved until SuperBench's idle sweep, and a host fills after a few cards
- * (`capacity_exhausted`). A card that comes back later (a review bounce) gets a fresh bench prepared
- * from its card branch.
+ * Ask a card's node to reclaim the card's bench (`bench.reclaim`). Called by the clearing sweep
+ * (bench-clearing.ts) once the card is done, cancelled or dormant, never because a checkpoint
+ * settled: one card keeps one bench from stage to stage and across review bounces.
  *
- * Per stage, on by default; `fleet bench stage set NAME --keep-bench` turns it off. Never for a card
- * with another unsettled attempt, and the node refuses a bench whose journal is unsettled or whose
- * lease is held. Best effort: a failed reclaim only logs; the card is already reported.
+ * The node refuses a bench whose journal is unsettled or whose lease is held, and one that is not
+ * ready. Best effort: a failed reclaim only logs, and the next sweep asks again.
  */
 import { and, eq } from "drizzle-orm";
 import { BenchReclaimReply, type BenchReclaimRequest } from "@agentpod/contract";
@@ -18,92 +15,58 @@ import { createLogger } from "../../utils/logger";
 import { request as nodeRequest } from "../broker";
 import { connectionManager } from "../broker";
 import { checkpointProfileId, type CheckpointProfile } from "./checkpoint-profile";
-import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { unresolvedCheckpointAttempts } from "./checkpoint-ledger";
 
-const log = createLogger("bridge-checkpoint");
+const log = createLogger("bench-clearing");
 
 export const BENCH_RECLAIM_VERB = "bench.reclaim";
 const RECLAIM_TIMEOUT_MS = 30_000;
 
-export interface ReclaimDeps {
-  /** Whether the attempt's stage keeps its benches (`--keep-bench`). A stage only in the profile file reclaims. */
-  keepBench(attempt: RetainedCheckpointAttempt): Promise<boolean>;
-  /** Another attempt on the same card that has not settled. */
-  unsettledSibling(attempt: RetainedCheckpointAttempt): Promise<boolean>;
-  request: typeof nodeRequest;
-  online(nodeId: string): boolean;
-}
-
-/** Whether a profile's stage keeps its benches. A profile with no stage row (one only in the file) reclaims. */
+/** Whether a profile's stage keeps its benches (`--keep-bench`): the hub never clears them. A profile only in the file does not. */
 export async function stageKeepsBench(profile: CheckpointProfile): Promise<boolean> {
   const [row] = await db.select({ keepBench: benchStages.keepBench }).from(benchStages)
     .where(and(eq(benchStages.tenantId, profile.target.tenant_id), eq(benchStages.name, checkpointProfileId(profile))));
   return row?.keepBench ?? false;
 }
 
-export const reclaimDeps: ReclaimDeps = {
-  keepBench: (attempt) => stageKeepsBench(attempt.profile),
-  async unsettledSibling(attempt) {
-    const rows = await unresolvedCheckpointAttempts(attempt.row.tenantId);
-    return rows.some((row) => row.attemptId !== attempt.row.attemptId && row.boardId === attempt.row.boardId &&
-      cardOf(row.prepareRequest) === attempt.request.identity.card_id);
-  },
-  request: nodeRequest,
-  online: (nodeId) => connectionManager.isOnline(nodeId),
-};
-
-function cardOf(prepareRequest: string): string | undefined {
-  try {
-    const value: unknown = JSON.parse(prepareRequest);
-    const identity = value && typeof value === "object" ? Reflect.get(value, "identity") : undefined;
-    const card = identity && typeof identity === "object" ? Reflect.get(identity, "card_id") : undefined;
-    return typeof card === "string" ? card : undefined;
-  } catch { // silent-catch-ok: a row whose request does not parse names no card, so it is no sibling of this one
-    return undefined;
-  }
+export interface ReclaimDeps {
+  request: typeof nodeRequest;
+  online(nodeId: string): boolean;
 }
+export const reclaimDeps: ReclaimDeps = { request: nodeRequest, online: (nodeId) => connectionManager.isOnline(nodeId) };
 
-export type ReclaimOutcome = "reclaimed" | "absent" | "kept" | "unsettled" | "refused" | "failed";
+/** Which card's bench, on which node. The node derives the bench key from these exactly as a prepare does. */
+export interface ReclaimTarget { nodeId: string; tenantId: string; boardId: string; stationId: string; cardId: string }
 
-/** Reclaim the settled card's bench. Never throws; returns what happened, for the log and tests. */
-export async function reclaimSettledBench(attempt: RetainedCheckpointAttempt, deps: ReclaimDeps = reclaimDeps): Promise<ReclaimOutcome> {
-  const facts = { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, attemptId: attempt.row.attemptId,
-    nodeId: attempt.profile.target.node_id };
+export type ReclaimOutcome = "reclaimed" | "absent" | "refused" | "failed";
+
+/** Reclaim the card's bench on one node. Never throws; returns what happened, for the log and the sweep. */
+export async function reclaimCardBench(target: ReclaimTarget, reason: string, deps: ReclaimDeps = reclaimDeps): Promise<ReclaimOutcome> {
+  const facts = { tenantId: target.tenantId, boardId: target.boardId, cardId: target.cardId, nodeId: target.nodeId, reason };
   try {
-    if (await deps.keepBench(attempt)) {
-      log.info("checkpoint settled; the stage keeps its benches (--keep-bench)", facts);
-      return "kept";
-    }
-    if (await deps.unsettledSibling(attempt)) {
-      log.info("checkpoint settled; the card has another unsettled attempt, so its bench is kept", facts);
-      return "unsettled";
-    }
-    if (!deps.online(attempt.profile.target.node_id)) {
-      log.warn("checkpoint settled; its bench was not reclaimed: the node is offline", facts);
+    if (!deps.online(target.nodeId)) {
+      log.warn("a card's bench was not cleared: the node is offline", facts);
       return "failed";
     }
-    const identity = attempt.request.identity;
-    const params: BenchReclaimRequest = { tenant_id: identity.tenant_id, board_id: identity.board_id,
-      station_id: identity.station_id, card_id: identity.card_id };
-    const res = await deps.request(attempt.profile.target.node_id, BENCH_RECLAIM_VERB, params, { timeoutMs: RECLAIM_TIMEOUT_MS });
+    const params: BenchReclaimRequest = { tenant_id: target.tenantId, board_id: target.boardId,
+      station_id: target.stationId, card_id: target.cardId };
+    const res = await deps.request(target.nodeId, BENCH_RECLAIM_VERB, params, { timeoutMs: RECLAIM_TIMEOUT_MS });
     const reply = res.ok ? BenchReclaimReply.safeParse(res.data) : undefined;
     if (!reply?.success) {
-      log.warn("checkpoint settled; its bench was not reclaimed", { ...facts, error: res.ok ? "the node's answer was not a reclaim reply" : res.error });
+      log.warn("a card's bench was not cleared", { ...facts, error: res.ok ? "the node's answer was not a reclaim reply" : res.error });
       return "failed";
     }
     const { state, code, bench_id } = reply.data;
     if (state === "refused") {
       // A held lease or an unsettled journal is the node keeping the bench on purpose: not a fault.
       const benign = code === "lease_held" || code === "unsettled" || code === "not_ready";
-      log[benign ? "info" : "warn"]("checkpoint settled; the node kept its bench", { ...facts, code, ...(bench_id ? { benchId: bench_id } : {}) });
+      log[benign ? "info" : "warn"]("the node kept a card's bench", { ...facts, code, ...(bench_id ? { benchId: bench_id } : {}) });
       return "refused";
     }
-    log.info(state === "reclaimed" ? "checkpoint settled; its bench was reclaimed" : "checkpoint settled; it had no bench left to reclaim",
+    log.info(state === "reclaimed" ? "a card's bench was cleared" : "a card had no bench left to clear",
       { ...facts, ...(bench_id ? { benchId: bench_id } : {}) });
     return state;
   } catch (error) {
-    log.warn("checkpoint settled; its bench was not reclaimed", { ...facts, error: error instanceof Error ? error.message : String(error) });
+    log.warn("a card's bench was not cleared", { ...facts, error: error instanceof Error ? error.message : String(error) });
     return "failed";
   }
 }

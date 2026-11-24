@@ -35,6 +35,7 @@ export * from "./acp";
 export * from "./bridge";
 export * from "./checkpoint-dispatch";
 export * from "./bench-stages";
+export * from "./bench-clearances";
 
 // Matrix Application Service bookkeeping (#351)
 export * from "./matrix";
