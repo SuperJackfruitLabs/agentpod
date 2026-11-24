@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.133 — 2026-11-24
+
 ### Added
 
 - A card's bench is cleared once the card is done, terminal, cancelled or dormant.
