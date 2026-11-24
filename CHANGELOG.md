@@ -20,6 +20,10 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Changed
 
+- The capability catalog (`/api/catalog/*`) and bridge roster (`/api/bridge/*`) refuse with
+  snake-case codes (`not_found`, `invalid_station`, `invalid_board`, `invalid_principal`) instead
+  of the free-text `not found` and `invalid station` they answered before, as treaty v0.0.19's
+  `capability-catalog` contract says. Statuses are unchanged; no consumer read the old words.
 - The push doors (`/public/bridge/superpipeline/push` and `/work`) accept only the
   suite's `x-treaty-signature`. The older `X-Superpipeline-Signature` fallback is
   gone: a push carrying only it is refused (401). SuperPipeline stops sending it in

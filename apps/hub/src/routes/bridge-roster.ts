@@ -216,22 +216,22 @@ export function createBridgeRosterRoute(deps: BridgeRosterDeps = defaults) {
       const r = await reader(c);
       if (r instanceof Response) return r;
       const prn = c.req.param("prn");
-      if (!PRN.test(prn)) return c.json({ error: "invalid principal" }, 400);
+      if (!PRN.test(prn)) return c.json({ error: "invalid_principal" }, 400);
       return c.json({ boards: await deps.boards(r.tenantId, prn) });
     })
     .get("/api/bridge/stations/:id", async (c) => {
       const r = await reader(c);
       if (r instanceof Response) return r;
       const id = c.req.param("id");
-      if (!STATION.test(id)) return c.json({ error: "invalid station" }, 400);
+      if (!STATION.test(id)) return c.json({ error: "invalid_station" }, 400);
       const s = await deps.station(r.tenantId, id);
-      return s ? c.json(s) : c.json({ error: "not found" }, 404);
+      return s ? c.json(s) : c.json({ error: "not_found" }, 404);
     })
     .get("/api/bridge/boards/:boardId/roster", async (c) => {
       const r = await reader(c);
       if (r instanceof Response) return r;
       const boardId = c.req.param("boardId");
-      if (!BOARD.test(boardId)) return c.json({ error: "invalid board" }, 400);
+      if (!BOARD.test(boardId)) return c.json({ error: "invalid_board" }, 400);
       return c.json({ boardId, agents: await deps.boardRoster(r.tenantId, boardId) });
     });
 }

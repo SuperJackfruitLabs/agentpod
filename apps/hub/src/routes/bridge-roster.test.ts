@@ -50,8 +50,10 @@ test("no bearer, or a token that does not verify, is 401", async () => {
   expect((await get(app(), "prn_000000000000000000a2", null)).status).toBe(401);
   expect((await get(app("service", READER, false), "prn_000000000000000000a2")).status).toBe(401);
 });
-test("a malformed principal is 400", async () => {
-  expect((await get(app(), "not-a-prn")).status).toBe(400);
+test("a malformed principal is 400 invalid_principal", async () => {
+  const r = await get(app(), "not-a-prn");
+  expect(r.status).toBe(400);
+  expect(await r.json()).toEqual({ error: "invalid_principal" });
 });
 
 const station = (a: ReturnType<typeof app>, id: string, authorization: string | null = "Bearer x.y.z") =>
@@ -62,10 +64,10 @@ test("a listed service reads whose station it is", async () => {
   expect(r.status).toBe(200);
   expect(await r.json()).toEqual({ id: "stn_00000000000000c1", key: "notes-station", owner: "prn_000000000000000000a1" });
 });
-test("a station the tenant does not have is 404", async () => {
+test("a station the tenant does not have is 404 not_found", async () => {
   const r = await station(app(), "stn_00000000000000ff");
   expect(r.status).toBe(404);
-  expect(await r.json()).toEqual({ error: "not found" });
+  expect(await r.json()).toEqual({ error: "not_found" });
 });
 test("the station read refuses an unlisted service, a person and an agent", async () => {
   expect((await station(app("service", "prn_0000000000000000c0b9"), "stn_00000000000000c1")).status).toBe(403);
@@ -74,8 +76,10 @@ test("the station read refuses an unlisted service, a person and an agent", asyn
   expect((await station(app(), "stn_00000000000000c1", null)).status).toBe(401);
   expect((await station(app("service", READER, false), "stn_00000000000000c1")).status).toBe(401);
 });
-test("a malformed station id is 400", async () => {
-  expect((await station(app(), "not a station")).status).toBe(400);
+test("a malformed station id is 400 invalid_station", async () => {
+  const r = await station(app(), "not a station");
+  expect(r.status).toBe(400);
+  expect(await r.json()).toEqual({ error: "invalid_station" });
 });
 
 const roster = (a: ReturnType<typeof app>, boardId: string, authorization: string | null = "Bearer x.y.z") =>
@@ -95,8 +99,10 @@ test("the board roster refuses an unlisted service, a person and an agent", asyn
   expect((await roster(app(), "brd_00000000000000b1", null)).status).toBe(401);
   expect((await roster(app("service", READER, false), "brd_00000000000000b1")).status).toBe(401);
 });
-test("a malformed board id is 400", async () => {
-  expect((await roster(app(), "brd_nothex")).status).toBe(400);
+test("a malformed board id is 400 invalid_board", async () => {
+  const r = await roster(app(), "brd_nothex");
+  expect(r.status).toBe(400);
+  expect(await r.json()).toEqual({ error: "invalid_board" });
 });
 
 const ROW = { key: "k", stationId: "stn_a", principalId: "prn_000000000000000000a2", enabled: true, busy: true, lastDispatchedAt: null };

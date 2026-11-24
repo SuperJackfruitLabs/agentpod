@@ -57,6 +57,11 @@ Each entry in a board's roster:
 service may read. People and agents get 403. The setting is read on each request, so changing it
 needs no restart.
 
+A refusal is `{ "error": "<code>" }` with a snake-case code: `unauthorized` (401), `forbidden` or
+`product_not_enabled` (403), `invalid_principal`, `invalid_station` or `invalid_board` (400, a path
+id not in its form), and `not_found` (404, a station that is not in your workspace). A board with no
+roster entries is an empty roster, not 404.
+
 ## Run evidence
 
 The reads an evaluation service, such as SuperWitness, makes about the work agents did. Each one
