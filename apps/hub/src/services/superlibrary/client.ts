@@ -1,6 +1,7 @@
 import { orgPlaneClient, type OrgPlaneClient } from "../../auth/org-plane/client";
 import { superlibraryConfig } from "./config";
 import { createLogger } from "../../utils/logger";
+import { checkSuperlibraryAnswer, type ContractRefusal } from "./contract";
 
 const log = createLogger("superlibrary");
 
@@ -32,8 +33,16 @@ export function createSuperlibraryClient(o: {
   audience: string;
   plane: Plane;
   fetch?: (r: Request) => Promise<Response>;
+  /**
+   * An answer treaty's `superlibrary.api` contract refuses (`contract.ts`). The answer still goes
+   * to its caller unchanged; by default the refusal is logged.
+   */
+  onContractRefusal?: (r: ContractRefusal & { method: string; path: string }) => void;
 }): SuperlibraryClient {
   const doFetch = o.fetch ?? ((r: Request) => fetch(r));
+  const onContractRefusal =
+    o.onContractRefusal ??
+    ((r) => log.warn("superlibrary answered outside its contract", { ...r, errors: r.errors.slice(0, 5) }));
   const tokens = new Map<string, { token: string; until: number }>();
   // Mints in flight, by key: a warm-up and the call that follows it join one mint instead of two.
   const minting = new Map<string, Promise<string>>();
@@ -75,7 +84,9 @@ export function createSuperlibraryClient(o: {
         const timer = setTimeout(() => ctl.abort(), init.timeoutMs ?? 30_000);
         timer.unref?.();
         try {
-          return await doFetch(new Request(`${o.url}${path}`, { method, headers, body, signal: ctl.signal }));
+          const res = await doFetch(new Request(`${o.url}${path}`, { method, headers, body, signal: ctl.signal }));
+          await checkSuperlibraryAnswer(method, path, res, (r) => onContractRefusal({ ...r, method, path }));
+          return res;
         } catch (err) {
           clearTimeout(timer);
           throw err;

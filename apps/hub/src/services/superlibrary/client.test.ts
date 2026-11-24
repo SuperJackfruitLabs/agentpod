@@ -138,3 +138,81 @@ test("a warm-up in flight and the call that follows it share one mint, and a fai
   expect((await f.asAgent(A2).request("POST", "/x", { json: {} })).ok).toBe(true);
   expect(n).toBe(2);
 });
+
+// ─── Treaty's superlibrary.api contract (phase 3): every answer checked, none changed ─────────────
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { installedDataDir } from "@superjackfruitlabs/treaty-contracts/node";
+import type { ContractRefusal } from "./contract";
+
+type Cases = { valid: Record<string, unknown>; invalid: Array<{ why: string; body: unknown }> };
+const libraryCases: { operations: Record<string, { responses?: Record<string, Cases> }> } = JSON.parse(
+  readFileSync(join(installedDataDir(), "fixtures/http/superlibrary/api.v1.cases.json"), "utf8"),
+);
+
+/** The calls the hub makes, as it makes them. */
+const CALLS = {
+  createUpload: ["POST", "/api/v1/uploads"],
+  putUploadFile: ["PUT", "/api/v1/uploads/upl_0123456789abcdef/files?path=execution-evidence.json"],
+  commitUpload: ["POST", "/api/v1/uploads/upl_0123456789abcdef/commit"],
+  verifyUpload: ["POST", "/api/v1/uploads/upl_0123456789abcdef/verification"],
+  relatedWork: ["POST", "/api/v1/related"],
+} as const;
+
+/** A client whose SuperLibrary answers `status` with `body`, and the refusals it reported. */
+function answering(status: number, body: string) {
+  const refusals: Array<ContractRefusal & { method: string; path: string }> = [];
+  const c = createSuperlibraryClient({
+    ...base,
+    plane: fakePlane().plane,
+    fetch: async () => new Response(status === 204 ? null : body, { status, headers: { "content-type": "application/json" } }),
+    onContractRefusal: (r) => refusals.push(r),
+  });
+  return { caller: c.asService({ principal: A1, kind: "agent" }), refusals };
+}
+
+for (const [operationId, [method, path]] of Object.entries(CALLS)) {
+  const responses = libraryCases.operations[operationId]?.responses ?? {};
+  test(`${operationId}: treaty's cases are checked, and every answer reaches its caller unchanged`, async () => {
+    expect(Object.keys(responses).length).toBeGreaterThan(0);
+    for (const [status, cases] of Object.entries(responses)) {
+      for (const [name, body] of Object.entries(cases.valid)) {
+        const { caller, refusals } = answering(Number(status), JSON.stringify(body));
+        const res = await caller.request(method, path, { json: {} });
+        expect({ name, refusals }).toEqual({ name, refusals: [] });
+        expect(await res.json()).toEqual(body);
+      }
+      for (const { why, body } of cases.invalid) {
+        const { caller, refusals } = answering(Number(status), JSON.stringify(body));
+        const res = await caller.request(method, path, { json: {} });
+        expect({ why, refused: refusals.map((r) => [r.operationId, r.status]) }).toEqual({ why, refused: [[operationId, Number(status)]] });
+        expect(res.status).toBe(Number(status));
+        expect(await res.json()).toEqual(body);
+      }
+    }
+  });
+}
+
+test("roster invalidation's 204 is the contract's", async () => {
+  const { caller, refusals } = answering(204, "");
+  expect((await caller.request("POST", "/api/v1/roster/invalidate", { json: { principal: A1 } })).status).toBe(204);
+  expect(refusals).toEqual([]);
+});
+
+test("a status the contract does not hold, or a body that is not JSON, is reported and still handed on", async () => {
+  const teapot = answering(418, JSON.stringify({ error: "teapot" }));
+  expect((await teapot.caller.request("POST", "/api/v1/related", { json: {} })).status).toBe(418);
+  expect(teapot.refusals.map((r) => r.operationId)).toEqual(["relatedWork"]);
+
+  const html = answering(200, "<html>gateway</html>");
+  expect(await (await html.caller.request("POST", "/api/v1/related", { json: {} })).text()).toBe("<html>gateway</html>");
+  expect(html.refusals).toEqual([{ operationId: "relatedWork", status: 200, errors: ["the body is not JSON"], method: "POST", path: "/api/v1/related" }]);
+});
+
+test("a route the contract does not hold is not checked", async () => {
+  const { caller, refusals } = answering(200, "not json");
+  await caller.request("POST", "/api/v1/search", { json: {} });
+  await caller.request("GET", "/api/v1/library/itm_1");
+  expect(refusals).toEqual([]);
+});
