@@ -313,7 +313,7 @@ describe("one event by both doors", () => {
     expect(seen).toEqual(["check.failed", "check.failed"]);
   });
 
-  test("an id the old signature carries is not believed: a board predating the move is not deduped by it", async () => {
+  test("the old signature, even beside an id, is refused: nothing is claimed and nothing handled", async () => {
     const receipts = memoryReceipts();
     const { seen, over } = recorders();
     const { d } = deps({ ...over, receipts });
@@ -326,8 +326,8 @@ describe("one event by both doors", () => {
       headers: { "content-type": "application/json", "ce-id": "brd_7c1f:10", "X-Superpipeline-Signature": legacy },
       body: raw,
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
     expect(receipts.held.size).toBe(0);
-    expect(seen).toEqual(["check.failed"]);
+    expect(seen).toEqual([]);
   });
 });

@@ -21,9 +21,9 @@ The bridge claims by calling the board. The board calls back through three signe
 
 All three carry the suite's delivery signature, `x-treaty-signature`: an HMAC over the timestamp,
 the event's id (`ce-id`) and the exact body, refused outside a five-minute window, so a captured
-delivery cannot be replayed later or under another id. Until SuperPipeline drops it, a board's push
-also carries its older `X-Superpipeline-Signature`, over the body alone; the hub accepts that one
-only from a board that sends no `x-treaty-signature` at all.
+delivery cannot be replayed later or under another id. It is the only signature the hub accepts: a
+push signed only with SuperPipeline's older `X-Superpipeline-Signature`, over the body alone, is
+refused (401). SuperPipeline v0.0.37 and later no longer send it.
 
 Each door answers by the suite's receiver status contract, so the board and the relay know whether
 to try again: **2xx** when the event was handled, or is one the hub does not take, or is for a

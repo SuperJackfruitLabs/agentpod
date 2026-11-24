@@ -1591,9 +1591,10 @@ mounted only when a Matrix bridge is configured: `POST /public/bridge/superpipel
 below) and `POST /public/bridge/superpipeline/events` (the event relay, below). The first two are
 signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_SECRET`; each answers
 503 when its secret is unset. All three verify `x-treaty-signature` (timestamp, `ce-id` and body, a
-300 s window). The first two still accept a board's older `X-Superpipeline-Signature` (body only), but
-only when no `x-treaty-signature` is sent; `push rejected: bad x-treaty-signature` in the log is a
-delivery whose new signature failed. All three answer by the suite's receiver status contract:
+300 s window), and only that: a board's older `X-Superpipeline-Signature` (body only), which
+SuperPipeline stopped sending in v0.0.37, is refused as unsigned (401).
+`push rejected: bad x-treaty-signature` in the log is a delivery whose signature failed. All three
+answer by the suite's receiver status contract:
 2xx handled or permanently ignored (an event this hub does not take, a board whose chat has moved,
 a board no roster row or dispatch here knows, such as one SuperExchange carries:
 `{"ok":true,"status":"ignored"}`); **503** for a rostered board this hub has not mapped to a tenant
@@ -1883,6 +1884,10 @@ the board's room — once per decision and notice, claimed in `matrix_decision_n
     escalated card was not moved`, `could not read a board to move its escalated cards`.
 - **An expired subject** closes its gate as `expired`; the sweep settles the room card with the
   `Expired — …` receipt (`decision: "expired"`, `decided_by: null`).
+- **A cancelled gate** (its card moved by hand or archived while the review was pending; the board
+  reads the gate as `cancelled` and sends no event): the sweep settles the room card with treaty's
+  `Cancelled — …` receipt (`decision: "cancelled"`, `decided_by: null`), once. A cancelled gate the
+  hub never posted is never posted.
 
 Logs: `matrix-decision-notices` (`a decision reminded`, `a decision escalated to the workspace admins`
 with `admins` and `invited`, `an escalation could not invite a workspace admin`) and

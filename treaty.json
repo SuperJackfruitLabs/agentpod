@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/treaty/product-manifest.v1.json",
   "product": "agentpod",
-  "treaty": "0.0.17",
+  "treaty": "0.0.18",
   "produces": [
     "agentpod.harness-permission",
     "agentpod.registered-worker",
