@@ -1,0 +1,206 @@
+{
+  "$schema": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/treaty/telemetry-conventions.v1.json",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/telemetry/suite.v1.json",
+  "conventions": "treaty telemetry conventions",
+  "version": 1,
+  "description": "The suite's telemetry conventions (superwitness C1 and C2): the spans and log lines a run leaves, the keys SuperWitness joins them by (`run.id` above all, `attempt.id` for attempts), and how the trace crosses into a harness. Content never becomes an attribute: ids, sequence numbers and allow-listed enums only. Telemetry is best-effort: a producer never fails or repeats work because of it.",
+  "attributes": {
+    "run.id": {
+      "type": "string",
+      "description": "The SuperPipeline run the telemetry is about (`run_…`, the run join key). The key SuperWitness finds a run's spans and log lines by."
+    },
+    "board.id": {
+      "type": "string",
+      "description": "The SuperPipeline board the run belongs to (`brd_…`)."
+    },
+    "card.id": {
+      "type": "string",
+      "description": "The SuperPipeline card the run works."
+    },
+    "station.id": {
+      "type": "string",
+      "description": "The AgentPod station that runs the harness."
+    },
+    "attempt.id": {
+      "type": "string",
+      "description": "One AgentPod ACP run of a harness for the dispatch (`attempt_…`). SuperWitness counts a run's spans per attempt by it."
+    },
+    "attempt.state": {
+      "type": "string",
+      "description": "How the attempt ended.",
+      "enum": ["completed", "failed"]
+    },
+    "acp.session_id": {
+      "type": "string",
+      "description": "The AgentPod ACP session the attempt ran in (`acps_…`). With `acp.seq_from` and `acp.seq_to`, it reaches the words in `acp_events`, which never become attributes."
+    },
+    "acp.seq_from": {
+      "type": "int",
+      "description": "The first ACP event sequence number the span covers.",
+      "minimum": 0
+    },
+    "acp.seq_to": {
+      "type": "int",
+      "description": "The last ACP event sequence number the span covers.",
+      "minimum": 0
+    },
+    "harness.name": {
+      "type": "string",
+      "description": "The harness the station runs (`hermes`, `salaam`, …)."
+    },
+    "run.epoch": {
+      "type": "int",
+      "description": "The claim generation of the run the dispatch observes (its lease epoch).",
+      "minimum": 0
+    },
+    "external.source": {
+      "type": "string",
+      "description": "Which work source the dispatch came from (`superpipeline`)."
+    },
+    "fingerprint.digest": {
+      "type": "string",
+      "description": "The digest of the harness's declared configuration for the attempt (`sha256:…`)."
+    },
+    "dispatch.status": {
+      "type": "string",
+      "description": "What the dispatch returned (`reported`, `self-reported`, `unreported`, `replayed`, `failed`, `foreign-run`, …, or `threw`). Open: a reader tolerates a value it does not know."
+    },
+    "error.type": {
+      "type": "string",
+      "description": "A turn's error kind (AgentPod's `TurnErrorKind`), set with an error status."
+    },
+    "run.action": {
+      "type": "string",
+      "description": "The run verb a SuperPipeline run route serves (`heartbeat`, `complete`, …), when it has one."
+    }
+  },
+  "spans": {
+    "dispatch": {
+      "description": "The root span of one claimed run, a new trace per run: from the claim to the dispatch's return.",
+      "producers": ["agentpod"],
+      "service": "agentpod-hub",
+      "required": [
+        "run.id",
+        "board.id",
+        "card.id",
+        "external.source",
+        "station.id",
+        "dispatch.status"
+      ],
+      "optional": ["run.epoch", "attempt.id", "fingerprint.digest"]
+    },
+    "attempt": {
+      "description": "One attempt of a harness at the run, a child of `dispatch`.",
+      "producers": ["agentpod"],
+      "service": "agentpod-hub",
+      "required": [
+        "attempt.id",
+        "station.id",
+        "fingerprint.digest",
+        "harness.name",
+        "acp.session_id",
+        "acp.seq_from",
+        "acp.seq_to",
+        "attempt.state"
+      ],
+      "optional": ["run.id"]
+    },
+    "turn": {
+      "description": "One prompt and the agent's answer to it, a child of `attempt`.",
+      "producers": ["agentpod"],
+      "service": "agentpod-hub",
+      "required": [
+        "attempt.id",
+        "station.id",
+        "fingerprint.digest",
+        "acp.seq_from",
+        "acp.seq_to"
+      ],
+      "optional": ["run.id", "error.type"]
+    },
+    "run_route": {
+      "description": "One request to a SuperPipeline run route (`/v1/boards/:id/runs/:runId[/:action]`), when the Workers runtime traces it.",
+      "producers": ["superpipeline"],
+      "service": "superpipeline-api",
+      "required": ["run.id", "board.id"],
+      "optional": ["run.action"]
+    }
+  },
+  "logs": {
+    "run route": {
+      "description": "The structured log line SuperPipeline writes once per run-route request, whether or not the request was traced; it also carries the incoming `traceparent` when one is well formed.",
+      "producers": ["superpipeline"],
+      "service": "superpipeline-api",
+      "required": ["run.id", "board.id"],
+      "optional": ["run.action"]
+    }
+  },
+  "propagation": {
+    "acp-meta-traceparent": {
+      "description": "The trace travels into a harness in the `_meta` of ACP `session/new` and `session/prompt` params: the hub writes the active trace's W3C context there, node-agent records a forward span as its child and rewrites `traceparent` to its own span, and the harness continues it. A hub can turn it off for a harness that refuses unknown `_meta` keys (`AGENTPOD_ACP_TRACE_META=false`); then the field is absent, never malformed.",
+      "carrier": "acp-meta",
+      "methods": ["session/new", "session/prompt"],
+      "producers": ["agentpod"],
+      "consumers": ["salaam"],
+      "fields": {
+        "traceparent": {
+          "required": true,
+          "description": "W3C Trace Context, version 00, with a nonzero trace id and span id. Lower-case hex.",
+          "schema": {
+            "type": "string",
+            "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+            "not": {
+              "anyOf": [
+                {
+                  "pattern": "^00-0{32}-"
+                },
+                {
+                  "pattern": "^00-[0-9a-f]{32}-0{16}-"
+                }
+              ]
+            }
+          }
+        },
+        "tracestate": {
+          "required": false,
+          "description": "W3C tracestate, when the trace has one.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "http-traceparent": {
+      "description": "A hub request to a SuperPipeline run route carries the dispatch's trace in W3C headers; SuperPipeline logs a well-formed `traceparent` on its run-route log line.",
+      "carrier": "http-headers",
+      "producers": ["agentpod"],
+      "consumers": ["superpipeline"],
+      "fields": {
+        "traceparent": {
+          "required": true,
+          "description": "As in acp-meta-traceparent.",
+          "schema": {
+            "type": "string",
+            "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+            "not": {
+              "anyOf": [
+                {
+                  "pattern": "^00-0{32}-"
+                },
+                {
+                  "pattern": "^00-[0-9a-f]{32}-0{16}-"
+                }
+              ]
+            }
+          }
+        },
+        "tracestate": {
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
