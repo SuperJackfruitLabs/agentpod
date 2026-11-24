@@ -10,6 +10,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Added
+
+- The node manages Hermes's `agent.reasoning_effort` as a reconcilable setting
+  (`hermes.agent.reasoning_effort`, per profile, restart to take effect), so a station can be
+  told to reason, and with `hermes.plugins.stream_reasoning_deltas` to stream its thought
+  deltas, through `fleet config` instead of a hand edit. Needs the node at this release.
+
 ### Fixed
 
 - A gate SuperPipeline cancels (its card moved by hand or archived while the review
@@ -20,6 +27,16 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Changed
 
+- With the suite's event relay configured (`TREATY_RELAY_DELIVERY_SECRET`), a board's push config
+  subscribes none of the eleven decision events: the relay delivers them all, so the push no
+  longer duplicates them. Each board's config is re-registered with an empty list within five
+  minutes of a restart. A hub without a relay keeps getting them by push, and the relay's own
+  `elicitation.pending` config stays. The relay's filter must carry all eleven, as staging's and
+  production's do.
+- The capability catalog (`/api/catalog/*`) and bridge roster (`/api/bridge/*`) refuse with
+  snake-case codes (`not_found`, `invalid_station`, `invalid_board`, `invalid_principal`) instead
+  of the free-text `not found` and `invalid station` they answered before, as treaty v0.0.19's
+  `capability-catalog` contract says. Statuses are unchanged; no consumer read the old words.
 - The push doors (`/public/bridge/superpipeline/push` and `/work`) accept only the
   suite's `x-treaty-signature`. The older `X-Superpipeline-Signature` fallback is
   gone: a push carrying only it is refused (401). SuperPipeline stops sending it in

@@ -1802,14 +1802,15 @@ that arrives by both doors is acted on once.** Both carry one id per event, `<bo
 attempt gives its claim back, so the retry is acted on. Each handler is also idempotent on its own
 key (the gate, the question, the notice), which covers a board that predates the shared id. An id
 is believed on the push only when `x-treaty-signature` vouched for it. **With the secret set, the
-relay is the only door for gates:** the hub's push subscription leaves `gate.pending` out (it logs
-`gates reach chat through the event relay; the push subscription leaves gate.pending out` at start).
-The other ten stay on the push subscription as well as the relay, so turning the relay on or off,
-or narrowing its filter, never leaves a decision without a door; the push drops them in a later
-change, once every deployment's relay carries them. SuperPipeline replaces a board's config on each
-sweep's registration, so a change reaches every board within five minutes of a restart. If the
-relay is down, gates wait for the sweep (≤ 5 min). A hub with no relay secret keeps getting gates by
-push. The log says which door posted a gate or a question:
+relay is the only door for decisions:** the hub's push subscription carries none of the eleven (it
+logs `decisions reach chat through the event relay; the push subscription carries none of them` at
+start), and registers each board's config with an empty event list, which clears what an older hub
+subscribed. The relay's filter must therefore carry all eleven, as the staging and production relays
+do; a relay narrowed below that leaves the missing events to the sweep. The relay's own service config
+for `elicitation.pending` (SuperToolkit's approval requests) is separate and stays. SuperPipeline
+replaces a board's config on each sweep's registration, so a change reaches every board within five
+minutes of a restart. If the relay is down, decisions wait for the sweep (≤ 5 min). A hub with no
+relay secret keeps getting every decision by push. The log says which door posted a gate or a question:
 
 ```bash
 journalctl -u agentpod-hub | grep 'gate projected' | grep -o 'via[^,}]*'   # push or event-relay

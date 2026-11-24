@@ -29,6 +29,10 @@ Every answer is scoped to the caller's workspace.
 | `GET /api/catalog/stations` | `{ stations: StationCapabilities[] }` |
 | `GET /api/catalog/stations/:id` | one `StationCapabilities`, or 404 |
 
+A refusal is `{ "error": "<code>" }` with a snake-case code: `unauthorized` (401), `forbidden` or
+`product_not_enabled` (403), `invalid_station` (400, an id that is not `[A-Za-z0-9_-]{1,100}`) and
+`not_found` (404, no such station in your workspace). Read the status; the code says which.
+
 A catalog entry:
 
 ```json

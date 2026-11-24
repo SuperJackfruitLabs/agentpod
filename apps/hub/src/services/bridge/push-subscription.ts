@@ -48,14 +48,16 @@ export const PUSH_EVENTS = [
 ] as const;
 
 /**
- * What a board's own config subscribes to. With the suite's event relay delivering gates to this
- * hub (`TREATY_RELAY_DELIVERY_SECRET` set), `gate.pending` comes through the relay alone and is left
- * out here (treaty plan, retiring the direct gate push; proven relay-only on 2026-11-11). Without
- * one, which is a hub on its own, the push stays the way gates arrive. Either way the five-minute
- * sweep stays the floor beneath both.
+ * What a board's own config subscribes to. With the suite's event relay delivering to this hub
+ * (`TREATY_RELAY_DELIVERY_SECRET` set), every decision event above reaches the hub through the
+ * relay's `/events` route, through treaty's guards (treaty phase 2), so the board's config subscribes
+ * none of them: pushing them as well would deliver each twice. Registration is an upsert on (agent,
+ * url), so the empty list also clears what an older hub subscribed. Without a relay, which is a hub
+ * on its own, the push stays the way decisions arrive. Either way the five-minute sweep stays the
+ * floor beneath both, and the relay's own service config (`RELAY_PUSH_EVENTS`) is separate.
  */
-export function pushEventsFor(gatesByEventRelay: boolean): string[] {
-  return gatesByEventRelay ? PUSH_EVENTS.filter((event) => event !== "gate.pending") : [...PUSH_EVENTS];
+export function pushEventsFor(decisionsByEventRelay: boolean): string[] {
+  return decisionsByEventRelay ? [] : [...PUSH_EVENTS];
 }
 
 export function pushHookUrl(publicUrl: string): string {
@@ -80,8 +82,8 @@ export interface SubscribeOptions {
   publicUrl: string;
   /** `SUPERPIPELINE_PUSH_SECRET`. Unset means the route refuses every push, so nothing is registered. */
   secret: string | undefined;
-  /** Gates reach this hub through the suite's event relay, so the push leaves `gate.pending` out. */
-  gatesByEventRelay?: boolean;
+  /** Decisions reach this hub through the suite's event relay, so the push subscribes none of them. */
+  decisionsByEventRelay?: boolean;
   fetch: Fetcher;
   /** Board → the credential to register it with (the same one the sweep reads it with). */
   boards: () => Promise<Map<string, string>>;
@@ -104,8 +106,10 @@ export interface SubscribeOptions {
 }
 
 /**
- * What the relay subscribes to. Only `elicitation.pending`: the other decision events already reach
- * the hub through the agent's config, and subscribing the relay to them too would deliver each twice.
+ * What the relay's service config subscribes to. Only `elicitation.pending`, the one event the board
+ * sends SuperToolkit's approval requests on, and only to a service-registered config. The decision
+ * events themselves reach the hub through the relay's `/events` delivery (with a relay) or the
+ * agent's config (without one), so subscribing this config to them too would deliver each twice.
  */
 export const RELAY_PUSH_EVENTS = ["elicitation.pending"] as const;
 
@@ -128,7 +132,7 @@ export async function subscribeBoardsToPush(opts: SubscribeOptions): Promise<Sub
       await new SuperpipelineClient({ baseUrl: opts.baseUrl, boardId, token, fetch: opts.fetch }).registerPushConfig({
         url,
         token: opts.secret,
-        events: pushEventsFor(opts.gatesByEventRelay ?? false),
+        events: pushEventsFor(opts.decisionsByEventRelay ?? false),
       });
       result.subscribed.push(boardId);
     } catch (err) {

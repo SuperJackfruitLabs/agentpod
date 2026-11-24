@@ -485,8 +485,8 @@ if (matrixBridge) {
     push: {
       secret: process.env.SUPERPIPELINE_PUSH_SECRET,
       publicUrl: config.publicUrl,
-      // The event relay delivers gates here (the /events route above), so the push stops carrying them.
-      gatesByEventRelay: (process.env.TREATY_RELAY_DELIVERY_SECRET ?? "").trim() !== "",
+      // The event relay delivers every decision here (the /events route above), so the push stops carrying them.
+      decisionsByEventRelay: (process.env.TREATY_RELAY_DELIVERY_SECRET ?? "").trim() !== "",
       relay: superpipelineRelay,
     },
   });

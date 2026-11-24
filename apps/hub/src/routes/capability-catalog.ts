@@ -81,8 +81,8 @@ export function createCapabilityCatalogRoute(deps: CapabilityCatalogDeps = defau
       const r = await reader(c);
       if (r instanceof Response) return r;
       const id = c.req.param("id");
-      if (!STATION.test(id)) return c.json({ error: "invalid station" }, 400);
+      if (!STATION.test(id)) return c.json({ error: "invalid_station" }, 400);
       const [row] = await deps.stations(r.tenantId, [id]);
-      return row ? c.json(row) : c.json({ error: "not found" }, 404);
+      return row ? c.json(row) : c.json({ error: "not_found" }, 404);
     });
 }

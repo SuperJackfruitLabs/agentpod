@@ -105,25 +105,42 @@ describe("subscribing each board to the hub's push", () => {
     expect(result.failed.map((f) => f.boardId)).toEqual(["brd_one"]);
   });
 
-  test("with the event relay delivering gates, the push leaves gate.pending out and keeps the rest", async () => {
+  test("with the event relay delivering decisions, the board's config subscribes none of them", async () => {
     const { sent, fetchImpl } = recordingFetch();
-    await subscribeBoardsToPush({
+    const result = await subscribeBoardsToPush({
       baseUrl: BASE,
       publicUrl: PUBLIC,
       secret: "shh",
-      gatesByEventRelay: true,
+      decisionsByEventRelay: true,
       fetch: fetchImpl,
       boards: async () => new Map([["brd_one", "spa_one"]]),
     });
 
-    const events = sent[0]?.body.events;
-    expect(events).not.toContain("gate.pending");
-    expect(events).toEqual(PUSH_EVENTS.filter((e) => e !== "gate.pending"));
+    // Still registered, with an empty list: the upsert clears what an older hub subscribed.
+    expect(result.subscribed).toEqual(["brd_one"]);
+    expect(sent[0]?.body.events).toEqual([]);
+    expect(pushEventsFor(true)).toEqual([]);
   });
 
-  test("a hub on its own, with no event relay, still gets its gates by push", () => {
+  test("a hub on its own, with no event relay, still gets every decision by push", () => {
+    expect(PUSH_EVENTS).toHaveLength(11);
     expect(pushEventsFor(false)).toContain("gate.pending");
     expect(pushEventsFor(false)).toEqual([...PUSH_EVENTS]);
+  });
+
+  test("with the relay, its own service config still carries elicitation.pending", async () => {
+    const { sent, fetchImpl } = recordingFetch();
+    const result = await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      decisionsByEventRelay: true,
+      fetch: fetchImpl,
+      boards: async () => new Map([["brd_one", "spa_one"]]),
+      relayTokenFor: async () => "relay-token",
+    });
+    expect(result.relayed).toEqual(["brd_one"]);
+    expect(sent.map((s) => s.body.events)).toEqual([[], [...RELAY_PUSH_EVENTS]]);
   });
 
   test("the hook URL tolerates a trailing slash on the public URL", () => {

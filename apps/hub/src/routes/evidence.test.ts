@@ -22,7 +22,17 @@ import { makeFingerprint } from "../services/evidence/fingerprint";
 import { setGrant } from "../auth/org-plane/grants";
 
 import { createPrincipal, forgetPrincipals } from "../../tests/helpers/principals";
-import { createEvidenceRoutes } from "./evidence";
+import { createEvidenceRoutes as createUncheckedEvidenceRoutes } from "./evidence";
+import { EVIDENCE, contractChecked } from "../../tests/helpers/agentpod-contract";
+
+/**
+ * The routes with every answer held to treaty's evidence.v1 (`contractChecked`). The agent-only
+ * export `POST` is not in that document, so it is answered unchecked.
+ */
+const createEvidenceRoutes = (deps?: Parameters<typeof createUncheckedEvidenceRoutes>[0]) =>
+  contractChecked(createUncheckedEvidenceRoutes(deps), EVIDENCE, {
+    outside: (method, path) => method === "POST" && path.endsWith("/execution/export"),
+  });
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import type { PlaneBearerResult } from "../auth/hub-token";
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../auth/org-plane/directory";

@@ -758,7 +758,7 @@ export function startGateSweeper(
      * board added, rebuilt, or a rotated secret is repaired within one interval. Without it no
      * board pushes and every gate waits for the sweep. See `bridge/push-subscription.ts`.
      */
-    push?: { secret: string | undefined; publicUrl: string; gatesByEventRelay?: boolean; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard };
+    push?: { secret: string | undefined; publicUrl: string; decisionsByEventRelay?: boolean; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard };
   } = {},
 ): (() => void) | null {
   const config =
@@ -817,7 +817,7 @@ function pushSubscriber(
   config: BridgeConfig,
   fetchImpl: Fetcher,
   roster: () => Promise<Array<{ boardId: string; token: string }>>,
-  push: { secret: string | undefined; publicUrl: string; gatesByEventRelay?: boolean; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard } | undefined,
+  push: { secret: string | undefined; publicUrl: string; decisionsByEventRelay?: boolean; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard } | undefined,
   tenantIdFor: (boardId: string) => Promise<string | null>,
 ): () => Promise<void> {
   if (!push) return async () => {};
@@ -825,8 +825,8 @@ function pushSubscriber(
     log.warn("push subscription skipped: SUPERPIPELINE_PUSH_SECRET is unset; gates arrive by sweep only");
     return async () => {};
   }
-  if (push.gatesByEventRelay) {
-    log.info("gates reach chat through the event relay; the push subscription leaves gate.pending out");
+  if (push.decisionsByEventRelay) {
+    log.info("decisions reach chat through the event relay; the push subscription carries none of them");
   }
   const subscribed = new Set<string>();
   const relayed = new Set<string>();
@@ -838,7 +838,7 @@ function pushSubscriber(
         baseUrl: config.baseUrl,
         publicUrl: push.publicUrl,
         secret: push.secret,
-        gatesByEventRelay: push.gatesByEventRelay ?? false,
+        decisionsByEventRelay: push.decisionsByEventRelay ?? false,
         fetch: fetchImpl,
         // A board whose chat has moved out of this hub is not subscribed to push here.
         boards: async () => {

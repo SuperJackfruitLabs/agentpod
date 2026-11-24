@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { CAPABILITY_CATALOG, contractChecked } from "../../tests/helpers/agentpod-contract";
 import { catalogReaders, createCapabilityCatalogRoute } from "./capability-catalog";
 import { CatalogResponse, CatalogStationsResponse, StationCapabilities as StationRow } from "@agentpod/contract";
 import type { CatalogEntry, StationCapabilities } from "../services/catalog";
@@ -23,15 +24,16 @@ const ROW: StationCapabilities = {
   credentials: [],
 };
 
+/** Every answer is held to treaty's capability-catalog.v1 (`contractChecked`). */
 function app(kind: "service" | "human" | "agent" = "service", sub = READER, token = true) {
-  return createCapabilityCatalogRoute({
+  return contractChecked(createCapabilityCatalogRoute({
     verify: async () =>
       token ? { ok: true, caller: { sub, principalKind: kind, tenantId: "tnt_1" } } : { ok: false, status: 401 },
     readers: () => [READER],
     catalog: async (tenantId) => (tenantId === "tnt_1" ? [ENTRY] : []),
     stations: async (tenantId, only) =>
       tenantId === "tnt_1" && (!only || only.includes(ROW.stationId)) ? [ROW] : [],
-  });
+  }), CAPABILITY_CATALOG);
 }
 const get = (a: ReturnType<typeof app>, path: string, authorization: string | null = "Bearer x.y.z") =>
   a.request(path, { headers: authorization ? { authorization } : {} });
@@ -45,9 +47,13 @@ test("a listed service reads the catalog, every station, and one station", async
   expect(StationRow.parse(await one.json())).toEqual(ROW);
 });
 
-test("a station not in the caller's workspace is 404; a malformed id is 400", async () => {
-  expect((await get(app(), "/api/catalog/stations/stn_00000000000000c9")).status).toBe(404);
-  expect((await get(app(), "/api/catalog/stations/bad.id")).status).toBe(400);
+test("a station not in the caller's workspace is 404 not_found; a malformed id is 400 invalid_station", async () => {
+  const missing = await get(app(), "/api/catalog/stations/stn_00000000000000c9");
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ error: "not_found" });
+  const malformed = await get(app(), "/api/catalog/stations/bad.id");
+  expect(malformed.status).toBe(400);
+  expect(await malformed.json()).toEqual({ error: "invalid_station" });
 });
 
 test("an unlisted service, a person or an agent is refused on every read", async () => {

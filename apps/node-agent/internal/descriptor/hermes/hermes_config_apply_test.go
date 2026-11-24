@@ -355,3 +355,45 @@ func TestApplyPreservesBothEditsWhenTheDocumentChangesDuringTheWrite(t *testing.
 		t.Fatalf("refusal does not say plainly that neither edit was lost: %q", r.Error)
 	}
 }
+
+func TestApplyWritesReasoningEffort(t *testing.T) {
+	for name, doc := range map[string]string{
+		"replacing a value":   "model: fixture\nagent:\n  max_turns: 60\n  reasoning_effort: low   # tuned\n",
+		"into an agent block": "model: fixture\nagent:\n  max_turns: 60\n",
+		"with no agent block": "model: fixture\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, key, cfg := hermesWithProfile(t, doc)
+			p, r := applyPlanned(t, h, key, "hermes.agent.reasoning_effort", "high")
+			if r.Phase != "applied" {
+				t.Fatalf("phase = %q, want applied (error: %q, refusal %+v)", r.Phase, r.Error, p.Refusal)
+			}
+			if len(p.Entries) != 1 || p.Entries[0].KeyPath != "agent.reasoning_effort" || !p.Entries[0].RestartToTakeEffect {
+				t.Fatalf("plan entries = %#v", p.Entries)
+			}
+			body, _ := os.ReadFile(cfg)
+			v, present, err := configedit.Read(body, "agent.reasoning_effort")
+			if err != nil || !present || v != "high" {
+				t.Fatalf("agent.reasoning_effort = %v (present %v, err %v) in:\n%s", v, present, err, body)
+			}
+			if strings.Contains(doc, "max_turns") && !strings.Contains(string(body), "max_turns: 60") {
+				t.Fatalf("a sibling key was lost:\n%s", body)
+			}
+			if !strings.Contains(string(body), "model: fixture") {
+				t.Fatalf("the rest of the document was lost:\n%s", body)
+			}
+		})
+	}
+}
+
+func TestPlanRefusesAReasoningEffortThatIsNotAScalar(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "model: fixture\n")
+	p, err := h.PlanConfig(context.Background(), key, "op_1",
+		[]descriptor.DeclaredSetting{{SettingID: "hermes.agent.reasoning_effort", Value: []any{"high"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Refusal == nil {
+		t.Fatalf("a list declared for a reconcilable scalar must be refused, got %#v", p)
+	}
+}

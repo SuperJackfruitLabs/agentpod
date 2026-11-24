@@ -426,6 +426,13 @@
               "scope": "profile",
               "policy": "additive-only",
               "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.agent.reasoning_effort",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
             }
           ]
         },
@@ -511,6 +518,13 @@
               "harness": "hermes",
               "scope": "profile",
               "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.agent.reasoning_effort",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
               "restartToTakeEffect": true
             }
           ]
@@ -608,6 +622,13 @@
               "harness": "hermes",
               "scope": "profile",
               "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.agent.reasoning_effort",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
               "restartToTakeEffect": true
             }
           ]

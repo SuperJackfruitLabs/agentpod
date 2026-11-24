@@ -118,4 +118,4 @@ export function boardTools(deps: DispatchDeps): AcpMcpServer[] | null {
  * `superpipeline_get_run`. The card prompt names them in prose, so renaming
  * this renames them there too — and the prompt would then be wrong.
  */
-const SUPERPIPELINE_MCP_NAME = "superpipeline";
+export const SUPERPIPELINE_MCP_NAME = "superpipeline";
