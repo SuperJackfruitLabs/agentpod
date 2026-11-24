@@ -22,7 +22,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "devDependencies": {
-    "@superjackfruitlabs/treaty-contracts": "0.0.17",
+    "@superjackfruitlabs/treaty-contracts": "0.0.18",
     "@types/bun": "latest",
     "@types/pg": "^8.23.1",
     "@types/pngjs": "^6.0.5",
@@ -51,9 +51,9 @@
     "@opentelemetry/sdk-logs": "^0.222.0",
     "@opentelemetry/sdk-metrics": "^2.11.0",
     "@opentelemetry/sdk-trace-base": "^2.11.0",
-    "@superjackfruitlabs/treaty-cloudevents": "0.0.17",
-    "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.17",
-    "@superjackfruitlabs/treaty-matrix-events": "0.0.17",
+    "@superjackfruitlabs/treaty-cloudevents": "0.0.18",
+    "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.18",
+    "@superjackfruitlabs/treaty-matrix-events": "0.0.18",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@types/dockerode": "^4.0.1",
