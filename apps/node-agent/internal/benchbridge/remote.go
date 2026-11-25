@@ -13,25 +13,26 @@ import (
 
 // remote serves attach and finish, the remote launch's two operations. Only a
 // remote-v1 profile answers them; any other launch refuses unsupported. Each
-// first asks the hub, at the execute level, whether this exact request for
-// this exact binding is current, then drives the attempt's own journal record.
+// first asks the hub (current phase "attach" or "finish") whether this exact
+// request for this exact binding is current, then drives the attempt's own
+// journal record.
 func (h *Handler) remote(ctx context.Context, r benchcoordinatorwire.Request, raw []byte, p LocalProfile, intent Intent) (benchcoordinatorwire.Response, error) {
 	if p.Launch != benchremote.Mode {
 		response := refused(r.Operation)
 		response.Code = "unsupported"
 		return response, nil
 	}
-	if intent.Spec == nil {
+	if intent.Spec == nil || intent.Launch != benchremote.Mode {
 		return pending(r), ErrIntent
 	}
 	prospective := intent
 	prospective.ExecuteRequest, prospective.ExecuteSHA256 = string(raw), rawSHA(raw)
-	if err := h.check(ctx, r, p, prospective, "execute"); errors.Is(err, ErrStale) {
+	if err := h.check(ctx, r, p, prospective, r.Operation); errors.Is(err, ErrStale) {
 		return staleOwner(r), nil
 	} else if err != nil {
 		return refused(r.Operation), ErrCurrent
 	}
-	m, ok := h.manager(r, p, prospective, "execute").(benchremote.Coordinator)
+	m, ok := h.manager(r, p, prospective, r.Operation).(benchremote.Coordinator)
 	if !ok {
 		return refused(r.Operation), ErrRegistry
 	}

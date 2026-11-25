@@ -408,8 +408,8 @@
       }
     },
     {
-      "name": "execute without source_digest (a remote attach or finish)",
-      "accept": true,
+      "name": "execute missing source_digest",
+      "accept": false,
       "value": {
         "version": "agentpod.bench-coordinator-current.v1",
         "phase": "execute",
@@ -488,6 +488,215 @@
         "profile_id": "profile-fixture",
         "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "source_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "prepare_request_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "remote attach",
+      "accept": true,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "attach",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "prepare_request_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "execute_request_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "name": "remote finish",
+      "accept": true,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "finish",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "prepare_request_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "execute_request_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "name": "attach with source_digest",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "attach",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "prepare_request_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "execute_request_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "name": "attach missing binding_sha256",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "attach",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "prepare_request_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "execute_request_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "name": "finish missing execute_request_sha256",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "finish",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "prepare_request_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
       }
     }

@@ -105,6 +105,13 @@ func (c Coordinator) Cancel(ctx context.Context, spec benchdispatch.SourceSpec) 
 	return c.launch().Cancel(ctx, spec)
 }
 
+// RetireUnlaunched retires this record for a target the node no longer
+// serves (the hub said stale_owner): stop, release, retire, as Cancel does. A
+// remote record never sends a run, so nothing holds it back.
+func (c Coordinator) RetireUnlaunched(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
+	return c.launch().RetireUnlaunched(ctx, spec)
+}
+
 // Reserved returns the exact spec this journal reserved for the attempt.
 func (c Coordinator) Reserved(ctx context.Context, spec benchdispatch.SourceSpec) (benchdispatch.SourceSpec, error) {
 	return c.launch().Reserved(ctx, spec)

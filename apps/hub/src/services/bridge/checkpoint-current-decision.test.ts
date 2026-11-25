@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { failedDecision, finalRowDecision } from "./checkpoint-current-decision";
+import { checkpointCurrentDecision, failedDecision, finalRowDecision } from "./checkpoint-current-decision";
 
 function row(): RetainedCheckpointAttempt["row"] {
   return { tenantId: "tenant", boardId: "brd_ABC123", runId: "run_ABC123", leaseEpoch: 7, attemptId: "attempt-fixture",
@@ -41,4 +43,19 @@ test("a failed decision stays unavailable when the board says the run is live, c
   let asked = false;
   expect(await failedDecision("node", undefined, async () => { asked = true; return true; })).toBe("unavailable");
   expect(asked).toBe(false);
+});
+
+// A remote stage's attach and finish are parsed but not decided yet: `pending` keeps the bench node from
+// issuing a certificate or finishing, and nothing is read for them.
+test("a remote attach or finish check is accepted and answered pending, never current", async () => {
+  const corpus = JSON.parse(readFileSync(join(import.meta.dir, "../../../../../packages/contract/src/fixtures/bench-coordinator-current-v1.json"), "utf8")) as
+    { requests: Array<{ name: string; value: { identity: { node_id: string } } }> };
+  for (const name of ["remote attach", "remote finish"]) {
+    const value = corpus.requests.find((c) => c.name === name)?.value;
+    if (!value) throw new Error(`fixture ${name} missing`);
+    const decision = await checkpointCurrentDecision(value.identity.node_id, new TextEncoder().encode(JSON.stringify(value)),
+      async () => { throw new Error("the board is not asked"); });
+    expect(decision.decision).toBe("refused");
+    expect("code" in decision ? decision.code : undefined).toBe("pending");
+  }
 });

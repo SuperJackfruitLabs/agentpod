@@ -178,16 +178,17 @@ export type BenchCoordinatorRequest = z.infer<typeof BenchCoordinatorRequest>;
 /** Node-authenticated fresh authority lookup; the URL and credential are installation-owned. */
 export const BENCH_COORDINATOR_CURRENT_VERSION = "agentpod.bench-coordinator-current.v1";
 export const BenchCoordinatorCurrentRequest = z.object({
-  version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), phase: z.enum(["prepare", "execute", "observe"]),
+  version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), phase: z.enum(["prepare", "execute", "observe", "attach", "finish"]),
   nonce: bid, identity: BenchCoordinatorIdentity, target: BenchCoordinatorTarget, profile_id: id,
   prepare_request_sha256: sha,
   execute_request_sha256: sha.optional(),
   binding_sha256: sha.optional(), source_digest: sha.optional(),
 }).strict().refine((r) => matched(r.identity, r.target) &&
   (r.source_digest === undefined || r.binding_sha256 !== undefined) &&
-  // An execute-phase check names the binding and the request it guards; a remote attach or finish has no
-  // source receipt of its own, so only an execute carries source_digest.
-  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.execute_request_sha256 !== undefined))
+  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.source_digest !== undefined && r.execute_request_sha256 !== undefined) &&
+  // A remote attach or finish names its binding and its own exact request bytes; it has no source receipt.
+  (r.phase !== "attach" && r.phase !== "finish" || r.binding_sha256 !== undefined && r.execute_request_sha256 !== undefined &&
+    r.source_digest === undefined))
   .refine((r) => bytes(r) <= BENCH_COORDINATOR_MAX_REQUEST);
 export type BenchCoordinatorCurrentRequest = z.infer<typeof BenchCoordinatorCurrentRequest>;
 const currentBase = { version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), nonce: bid,

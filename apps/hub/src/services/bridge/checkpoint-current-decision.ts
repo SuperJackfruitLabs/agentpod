@@ -93,6 +93,9 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array,
   let matched: RetainedCheckpointAttempt | undefined;
   try {
     if (nodeId !== request.identity.node_id || nodeId !== request.target.node_id) return refused("unauthorized");
+    // A remote stage's attach or finish (the bench node's remote-v1 launch). The hub does not decide these
+    // yet: `pending` keeps the node from issuing a certificate or finishing until it does.
+    if (request.phase === "attach" || request.phase === "finish") return refused("pending");
     const attempt = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
     if (!attempt || canonicalCheckpoint(request.identity) !== canonicalCheckpoint(attempt.request.identity) ||
       canonicalCheckpoint(request.target) !== canonicalCheckpoint(attempt.request.target) ||

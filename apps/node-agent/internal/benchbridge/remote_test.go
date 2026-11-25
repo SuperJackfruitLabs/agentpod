@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
@@ -132,5 +136,80 @@ func TestAttachedResponseCarriesTheCredentialOnly(t *testing.T) {
 	if err != nil || response.State != "attached" || response.Credential == nil || response.Credential.ValidBefore != "2026-11-25T12:30:00.123456789Z" ||
 		response.Credential.WorkingDirectory != "/bounded/benches/card-1" {
 		t.Fatalf("attached reply wrong: %+v %v", response.Credential, err)
+	}
+}
+
+// remoteChoice is the fixture prepare resolved by a remote-v1 profile: no worker arguments.
+func remoteChoice(prepare benchcoordinatorwire.Request) (benchdispatch.SourceSpec, benchdispatch.SourceTask) {
+	spec, task := intentChoice(prepare)
+	task.Arguments = []string{}
+	spec.TaskSHA256 = benchdispatch.SourceTaskSHA256(task)
+	return spec, task
+}
+
+// Only a remote-v1 intent may have a task with no worker arguments, and a
+// remote-v1 intent may have none.
+func TestOnlyARemoteIntentHasNoWorkerArguments(t *testing.T) {
+	raw, prepare := prepareFixture(t)
+	for _, c := range []struct {
+		launch string
+		args   []string
+		ok     bool
+	}{{benchremote.Mode, []string{}, true}, {"", []string{}, false}, {"registered-v1", []string{}, false}, {benchremote.Mode, []string{"/bin/sh"}, false}, {"", []string{"/bin/sh"}, true}} {
+		store := intentStore(t)
+		store.Launch = c.launch
+		_, err := store.Resolve(context.Background(), raw, func(context.Context) (benchdispatch.SourceSpec, benchdispatch.SourceTask, error) {
+			spec, task := intentChoice(prepare)
+			task.Arguments = c.args
+			spec.TaskSHA256 = benchdispatch.SourceTaskSHA256(task)
+			return spec, task, nil
+		})
+		if (err == nil) != c.ok {
+			t.Fatalf("launch %q with %d arguments: resolved=%v", c.launch, len(c.args), err == nil)
+		}
+		if c.ok {
+			if got, err := store.Read(context.Background(), prepare); err != nil || got.Launch != map[string]string{benchremote.Mode: benchremote.Mode}[c.launch] {
+				t.Fatalf("launch %q not read back: %q %v", c.launch, got.Launch, err)
+			}
+		}
+	}
+}
+
+// A remote attempt whose target the node no longer serves is retired from
+// the remote journal (its lease stopped and released, its record ended
+// stale_owner), not left parked unavailable for ever.
+func TestSupersededRemoteRecordRetires(t *testing.T) {
+	raw, prepare := prepareFixture(t)
+	h, _ := upgradedNode(t, "stale_owner")
+	store := IntentStore{Root: h.registry.IntentRoot, Launch: benchremote.Mode}
+	spec, task := remoteChoice(prepare)
+	if _, err := store.Resolve(context.Background(), raw, func(context.Context) (benchdispatch.SourceSpec, benchdispatch.SourceTask, error) {
+		return spec, task, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if send, err := store.ClaimEffects(context.Background(), raw); !send || err != nil {
+		t.Fatal("effects not claimed", err)
+	}
+	// The remote journal holds the attempt's reserved record; nothing was leased yet.
+	root := benchremote.JournalRoot(h.registry.StateRoot)
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	id := benchattempt.SourceSpecSHA256(spec)
+	doc, _ := json.Marshal(map[string]any{"version": benchremote.JournalVersion, "bench_key": spec.BenchKey, "active": id,
+		"records": []any{map[string]any{"id": id, "spec": spec, "phase": "reserved", "steps": []any{}}}})
+	if err := os.WriteFile(filepath.Join(root, spec.BenchKey+".json"), doc, 0600); err != nil {
+		t.Fatal(err)
+	}
+	status := statusFor(t, prepare)
+	response, err := h.serve(context.Background(), status, nil)
+	got := transportOutcome(status, response, err)
+	if got.State != "refused" || got.Code != "stale_owner" {
+		t.Fatalf("superseded remote record answered %s/%s", got.State, got.Code)
+	}
+	after, _ := os.ReadFile(filepath.Join(root, spec.BenchKey+".json"))
+	if !strings.Contains(string(after), `"phase":"refused"`) || !strings.Contains(string(after), `"code":"stale_owner"`) {
+		t.Fatalf("remote record not retired: %s", after)
 	}
 }
