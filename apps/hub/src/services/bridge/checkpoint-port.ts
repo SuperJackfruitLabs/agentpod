@@ -12,7 +12,8 @@ import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint
 import { checkpointDriveDeps, driveCheckpointAttempt, endEndedRun, RUN_ENDABLE_PHASES } from "./checkpoint-orchestrator";
 import { capacityHold, createCapacityBackoff } from "./checkpoint-capacity-backoff";
 import { readRunEnded } from "./checkpoint-run-ended";
-import { resolveSupersededAttempt } from "./checkpoint-supersede";
+import { defaultSupersedeDeps, resolveSupersededAttempt } from "./checkpoint-supersede";
+import { endRemoteWork } from "./checkpoint-remote";
 import { createAttemptBackoff } from "./checkpoint-recover-backoff";
 import { createLogger } from "../../utils/logger";
 import { createQuietLog } from "./quiet-log";
@@ -197,7 +198,9 @@ function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: strin
         // Made under a profile this installation has replaced: it can never be driven again, only
         // resolved. Retired with the node's evidence when that proves nothing is outstanding;
         // otherwise parked, named, for an owner or admin to settle (`/api/admin/checkpoint/attempts`).
-        const resolution = await resolveSupersededAttempt(attempt);
+        // A remote stage's agent stops: its session is ended and its station detached.
+        const resolution = await resolveSupersededAttempt(attempt, { ...defaultSupersedeDeps,
+          detach: (a) => endRemoteWork(a, deps, "The bench stage's profile was replaced.") });
         const meta = { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
           attemptId: attempt.row.attemptId, phase: attempt.row.phase, reason: resolution.reason,
           ...(resolution.outcome === "parked" && resolution.error ? resolution.error : {}) };

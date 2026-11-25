@@ -34,6 +34,9 @@ import { parseCheckpointSource, type CheckpointSource } from "../../src/services
 import { checkpointSettlementSchema } from "../../src/services/bridge/checkpoint-settlement-data";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "../../src/services/bridge/checkpoint-claim";
 import { resetRemoteTurnsForTests, stationBenchBusy } from "../../src/services/bridge/checkpoint-remote";
+import { sweepRemoteDetach } from "../../src/services/bridge/checkpoint-remote-sweep";
+import { startBenchClearing } from "../../src/services/bridge/bench-clearing";
+import { resolveSupersededAttempt } from "../../src/services/bridge/checkpoint-supersede";
 import { parseRemoteState } from "../../src/services/bridge/checkpoint-remote-state";
 import { REMOTE_TURN_PREFACE } from "../../src/services/bridge/checkpoint-remote-turn";
 import { runOnce } from "../../src/services/bridge/dispatch";
@@ -96,6 +99,10 @@ const seen = {
   settlements: [] as string[], heartbeats: 0,
   /** What the next finishes answer; a dirty one fences, and until a new attach reaches the agent's node every finish stays dirty. */
   finishReplies: [] as Array<"completed" | "dirty">, fenced: false, reissued: false, detach: "detached" as "detached" | "lost",
+  /** The board reclaimed the served run (its heartbeat lapsed). */
+  runEnded: false,
+  /** The bench host's node's answer to `status`, when set (a node told its run ended stops, releases and answers stale_owner). */
+  statusReply: undefined as Record<string, unknown> | undefined,
 };
 let attempt: RetainedCheckpointAttempt;
 let completionFor: Awaited<ReturnType<typeof checkpointNodeObservation>>;
@@ -128,7 +135,8 @@ function benchNodeAnswers() {
       seen.bench.push({ operation: sent.operation, params });
       const own = { version: "agentpod.bench-coordinator.v1", operation: sent.operation, identity: attempt.request.identity, target: profile.target };
       let data: Record<string, unknown>;
-      if (sent.operation === "prepare" || sent.operation === "status") data = { ...own, state: "prepared", source: completionFor.source };
+      if (sent.operation === "status" && seen.statusReply) data = { version: own.version, operation: "status", ...seen.statusReply };
+      else if (sent.operation === "prepare" || sent.operation === "status") data = { ...own, state: "prepared", source: completionFor.source };
       else if (sent.operation === "attach" || sent.operation === "finish") {
         const current = await decide(sent.operation, params);
         seen.decisions.push({ phase: sent.operation, probe: "exact", ...current });
@@ -224,8 +232,10 @@ beforeAll(async () => {
       sub: profile.reporterPrincipalId, principalKind: "service", org: organizationId, aud: profile.sourceAudience,
       ent: ["superpipeline"], scope: "checkpoints:read checkpoints:submit" }), expires_in: 300 });
     const base = `${profile.sourceOrigin}/v1/boards/${selected.boardId}/runs/${selected.runId}`;
-    if (address === base) return Response.json({ ...claimFixture.context, run: { ...claimFixture.context.run, runId: selected.runId },
-      card: { ...claimFixture.context.card, currentRunId: selected.runId }, stage: { ...claimFixture.context.stage, checkpointPolicy: policy } });
+    if (address === base) return Response.json({ ...claimFixture.context, run: { ...claimFixture.context.run, runId: selected.runId,
+      ...(seen.runEnded ? { status: "reclaimed", endedAt: "2026-11-25T12:20:00Z" } : {}) },
+      card: { ...claimFixture.context.card, currentRunId: seen.runEnded ? null : selected.runId },
+      stage: { ...claimFixture.context.stage, checkpointPolicy: policy } });
     if (address === base + "/heartbeat") { seen.heartbeats++; return Response.json({ ok: true }); }
     if (address === base + "/checkpoint-source") {
       if (init?.method === "POST") {
@@ -491,4 +501,99 @@ test("the hub's session open checks the bridge's admission under the station's o
   await expect(refused).rejects.toThrow(STATION_HELD_MESSAGE);
   await admitAndOpen({ stationId, admit: async () => { order.push("admit"); } }, async () => { order.push("opened"); });
   expect(order).toEqual(["lock held", "lock released", "admit", "admit", "opened"]);
+});
+
+test("a reclaimed run makes the bench node release and the agent's node detach", async () => {
+  // The second card's attempt (r2), left working above: its agent's turn is lost, and nothing heartbeats the run.
+  const [row] = await rawSql`SELECT attempt_id FROM checkpoint_dispatches WHERE tenant_id = ${tenantId} AND phase = 'working'`;
+  if (!row) throw new Error("no working attempt");
+  const working = await readCheckpointAttempt(tenantId, String(row.attempt_id));
+  if (!working) throw new Error("attempt missing");
+  const prior = { attempt, selected };
+  attempt = working; selected = claimFor("r2");
+  try {
+    const client = await checkpointAgentClient(profile);
+    listener?.({ sessionId: "acps_" + suffix, seq: 900, type: "error", payload: { message: "agent crashed" }, createdAt: "" });
+    listener?.({ sessionId: "acps_" + suffix, seq: 901, type: "state", payload: { status: "idle" }, createdAt: "" });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    const beats = seen.heartbeats;
+    expect(await driveCheckpointAttempt(working, client, false, deps())).toMatchObject({ status: "unreported" });
+    expect(seen.heartbeats).toBe(beats);
+    expect((await stored()).phase).toBe("working");
+
+    // SuperPipeline reclaims the run. The bench host's node, told, stops the lease (which cuts every session),
+    // releases it and retires its record; the agent's node restores the station's terminal.
+    seen.runEnded = true;
+    seen.statusReply = { state: "refused", code: "stale_owner" };
+    const ended = seen.ended.length, detaches = seen.agent.filter((c) => c.verb === "bench.remote.detach").length;
+    const parked = await readCheckpointAttempt(tenantId, working.row.attemptId);
+    if (!parked) throw new Error("attempt missing");
+    expect(await driveCheckpointAttempt(parked, client, false, deps())).toMatchObject({ status: "released" });
+    expect(seen.bench.at(-1)?.operation).toBe("status");
+    expect(seen.agent.filter((c) => c.verb === "bench.remote.detach")).toHaveLength(detaches + 1);
+    expect(seen.agent.at(-1)?.params).toEqual({ stationId, attemptId: working.row.attemptId });
+    expect(seen.ended.length).toBeGreaterThan(ended);
+    const retired = await stored();
+    expect(retired.phase).toBe("retired");
+    expect(JSON.parse(String(retired.retirement))).toMatchObject({ reason: "run_ended", phase: "working", by: "hub" });
+    expect(parseRemoteState(retired.remote)).toMatchObject({ detached: true });
+    // Any later attach or finish the node might ask about is a stale owner; the station is free; nothing was sent to the board.
+    const lastAttach = seen.bench.filter((c) => c.operation === "attach").at(-1)?.params;
+    if (!lastAttach) throw new Error("no attach");
+    expect(await decide("attach", lastAttach)).toEqual({ decision: "refused", code: "stale_owner" });
+    expect(await stationBenchBusy(tenantId, stationId)).toBe(false);
+  } finally {
+    ({ attempt, selected } = prior);
+    seen.runEnded = false; seen.statusReply = undefined;
+  }
+});
+
+test("detach sweep retries until the agent's node answers", async () => {
+  // The first card settled, but say its detach never confirmed: the station stays busy.
+  const settled = await stored();
+  const state = parseRemoteState(settled.remote);
+  if (!state) throw new Error("no remote state");
+  await rawSql`UPDATE checkpoint_dispatches SET remote = ${canonicalCheckpoint({ ...state, detached: false })}
+    WHERE tenant_id = ${tenantId} AND attempt_id = ${attempt.row.attemptId}`;
+  expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
+  // Its settlement's own detach was the first.
+  const before = seen.agent.filter((c) => c.verb === "bench.remote.detach" && c.params.attemptId === attempt.row.attemptId).length;
+  const asked = () => seen.agent.filter((c) => c.verb === "bench.remote.detach" && c.params.attemptId === attempt.row.attemptId).length - before;
+  // The agent's node does not answer: nothing is recorded, still busy.
+  seen.detach = "lost";
+  try {
+    await sweepRemoteDetach();
+    expect(asked()).toBe(1);
+    expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
+    expect(parseRemoteState((await stored()).remote)).toMatchObject({ detached: false });
+  } finally { seen.detach = "detached"; }
+  // It answers: on the bench clearing's own timer, the detach is recorded, only now is the station free,
+  // and the next sweep asks nothing of it.
+  const timer = startBenchClearing(20);
+  try {
+    for (let i = 0; i < 200 && parseRemoteState((await stored()).remote)?.detached !== true; i++) await Bun.sleep(10);
+  } finally { timer.stop(); }
+  expect(asked()).toBe(2);
+  expect(parseRemoteState((await stored()).remote)).toMatchObject({ detached: true });
+  expect((await stored()).phase).toBe("reported");
+  expect(await stationBenchBusy(tenantId, stationId)).toBe(false);
+  await sweepRemoteDetach();
+  expect(asked()).toBe(2);
+});
+
+test("superseded remote attempt detaches", async () => {
+  await onRun("r5", async () => {
+    const client = await checkpointAgentClient(profile);
+    expect(await driveCheckpointAttempt(attempt, client, true, deps())).toMatchObject({ recheckMs: 5_000 });
+    const working = await readCheckpointAttempt(tenantId, attempt.row.attemptId);
+    if (!working) throw new Error("attempt missing");
+    const ended = seen.ended.length;
+    // Its profile was replaced: it is parked for an owner or admin, and its agent stops first.
+    expect(await resolveSupersededAttempt(working)).toEqual({ outcome: "parked", reason: "superseded.effect_possible" });
+    expect(seen.agent.at(-1)).toEqual({ verb: "bench.remote.detach", params: { stationId, attemptId: attempt.row.attemptId } });
+    expect(seen.ended.length).toBe(ended + 1);
+    const row = await stored();
+    expect(row.phase).toBe("working");
+    expect(parseRemoteState(row.remote)).toMatchObject({ detached: true });
+  });
 });

@@ -54,13 +54,20 @@ export interface RemoteState {
   retryPrompt?: string;
   /** The summary of the agent's earlier turns, kept across dirty retries and joined with the last one. */
   summary?: string;
+  /**
+   * When the agent's first turn started (RFC 3339): the stage's turn bound runs from here, across dirty
+   * retries and hub restarts alike.
+   */
+  turnStartedAt?: string;
+  /** The ACP session the agent works in now, so a hub restart can end it before it resumes in a new one. */
+  sessionId?: string;
 }
 
 const schema = z.object({ publicKeyFingerprint: z.string().regex(/^SHA256:[A-Za-z0-9+/]{1,128}(?![\s\S])/), attachRequestSHA256: sha,
   user: z.string().max(64), address: z.string().max(300), workingDirectory: z.string().max(4096), validBefore: z.string().max(40),
   agentAttachSent: z.boolean(), attached: z.boolean(), detached: z.boolean(), dirtyTries: z.number().int().min(0).max(16), resumed: z.boolean(),
   finishRequest: z.string().min(1).max(65536).optional(), retryPrompt: z.string().min(1).max(2048).optional(),
-  summary: z.string().max(8192).optional() }).strict();
+  summary: z.string().max(8192).optional(), turnStartedAt: z.string().max(40).optional(), sessionId: z.string().min(1).max(200).optional() }).strict();
 
 /**
  * Whether the agent's node may still point the station at the bench: an attach was sent and no

@@ -14,8 +14,10 @@ import { canonicalCheckpoint } from "./checkpoint-json";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { driveCheckpointAttempt, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
-import { REMOTE_DIRTY_PROMPT, REMOTE_DIRTY_RETRIES, REMOTE_HEARTBEAT_MS, REMOTE_PHASES, REMOTE_RENEW_BEFORE_MS,
-  resetRemoteTurnsForTests, type RemoteSeams } from "./checkpoint-remote";
+import { endRemoteWork, REMOTE_DIRTY_PROMPT, REMOTE_DIRTY_RETRIES, REMOTE_HEARTBEAT_MS, REMOTE_PHASES, REMOTE_REATTACH_RETRY_MS,
+  REMOTE_RENEW_BEFORE_MS, REMOTE_RESUME_PROMPT, resetRemoteTurnsForTests, type RemoteSeams } from "./checkpoint-remote";
+import { sweepRemoteDetach } from "./checkpoint-remote-sweep";
+import { resolveSupersededAttempt } from "./checkpoint-supersede";
 import { parseRemoteState, publicKeyFingerprint, remoteDecision } from "./checkpoint-remote-state";
 import { REMOTE_TURN_PREFACE, startRemoteTurn, type RemoteTurn, type RemoteTurnClient, type RemoteTurnDeps,
   type RemoteTurnEnd } from "./checkpoint-remote-turn";
@@ -55,7 +57,8 @@ async function remoteAttempt(phase = "attach_pending") {
   // The stage's task timeout bounds the agent's turn: an hour here.
   const request = { ...attempt.request, task: { ...attempt.request.task, timeout_seconds: 3600 } };
   const remote: RetainedCheckpointAttempt = { ...attempt, profile, request, row: { ...attempt.row, profile: canonicalCheckpoint(profile), phase,
-    executeRequest: null, executeSHA256: null } };
+    // Claimed well before the attach (a long prepare): the turn's bound counts from the turn, not the claim.
+    executeRequest: null, executeSHA256: null, createdAt: new Date(T0 - 55 * 60_000), updatedAt: new Date(T0) } };
   // The bench pushed a change, under the remote execution and the digest of the report the node journaled.
   const first = completion.service.checkpoints[0];
   if (!first) throw new Error("fixture checkpoint missing");
@@ -94,19 +97,32 @@ function harness(initial: RetainedCheckpointAttempt) {
     /** The last finish fenced the sessions: until a bench attach and then an agent attach, nothing the agent does lands. */
     fenced: false, reissued: false, locks: [] as string[],
     agentAttach: undefined as undefined | ((params: Record<string, unknown>) => { ok: boolean; data?: unknown; error?: string }),
+    /** The agent's node's answer to a detach. */
+    agentDetach: (): { ok: boolean; data?: unknown; error?: string } => ({ ok: true, data: { state: "detached" } }),
+    /** The bench host's node's answer to the run-ended `status`: by default it stopped and released (the hub said stale_owner). */
+    statusReply: { state: "refused", code: "stale_owner" } as Record<string, unknown>,
+    /** What the board's run view says (GET runs/:id); undefined is the run still working. */
+    runView: undefined as unknown, stationReady: true, endedSessions: [] as string[],
+    retired: [] as Array<{ reason: string; by: string; evidence: string; phase: string }>,
     client: new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
       fetch: contractFetch(async (url, init) => {
         board.push({ path: url.replace("https://board.test", ""), body: JSON.parse(init.body ?? "{}") });
-        return { status: 200, ok: true, json: async () => ({}) };
+        const view: unknown = init.method === "GET" && url.endsWith(`/runs/${initial.claim.runId}`) ? h.runView : undefined;
+        return { status: 200, ok: true, json: async (): Promise<unknown> => view ?? {} };
       }) }),
     sent: (verb: string, operation?: string) => calls.filter((c) => c.verb === verb && (!operation || c.params.operation === operation)),
     heartbeats: () => board.filter((c) => c.path.endsWith("/heartbeat")).length,
+    /** The run verbs the hub must never send on its own for a lost agent. */
+    runVerbs: () => board.filter((c) => /\/(fail|release)$/.test(c.path)),
     turn: () => { const t = turns.at(-1); if (!t) throw new Error("no turn started"); return t; },
   };
-  const keep = (attempt: RetainedCheckpointAttempt) => { h.latest = attempt; return attempt; };
+  // Every write stamps the row as the ledger does: the run-ended wait counts from the last one.
+  const keep = (attempt: RetainedCheckpointAttempt) => { h.latest = { ...attempt, row: { ...attempt.row, updatedAt: new Date(h.now) } }; return h.latest; };
   const seams: RemoteSeams = {
     turn: { acp: { ...idleAcp, withStationLock: async (stationId, fn) => { h.locks.push(`enter:${stationId}`);
-      try { return await fn(); } finally { h.locks.push(`leave:${stationId}`); } } },
+      try { return await fn(); } finally { h.locks.push(`leave:${stationId}`); } },
+    stationReady: async () => ({ ready: h.stationReady, ...(h.stationReady ? {} : { reason: "Node is offline." }) }),
+    endSession: async (_user, session) => { h.endedSessions.push(session); } },
     agent: { key: "fixture", boardId: "brd_ABC123", token: "spa_x", stationId: initial.profile.target.station_id,
       hubUserId: "usr_x", mode: "full-auto" }, tenantId: initial.row.tenantId },
     start: async (_deps, _attempt, cwd, opening = "") => {
@@ -129,6 +145,8 @@ function harness(initial: RetainedCheckpointAttempt) {
         const sent = BenchCoordinatorRequest.parse(params);
         if (sent.operation === "ready") return { ok: false, error: "unexpected operation" };
         const own = { identity: sent.identity, target: sent.target };
+        if (sent.operation === "status") return { ok: true, data: { version: sent.version, operation: "status", ...h.statusReply,
+          ...(h.statusReply.state === "refused" ? {} : own) } };
         if (sent.operation === "attach") {
           if (h.fenced) h.reissued = true;
           return { ok: true, data: { ...reply("attached"), ...own, credential: { ...CREDENTIAL, valid_before: h.certificateValidBefore } } };
@@ -149,7 +167,7 @@ function harness(initial: RetainedCheckpointAttempt) {
         return { ok: true, data: { state: "attached", validBefore: iso(Date.parse(validBeforeOf(params.credential))) } };
       }
       if (verb === "bench.remote.status") return { ok: true, data: h.status };
-      if (verb === "bench.remote.detach") return { ok: true, data: { state: "detached" } };
+      if (verb === "bench.remote.detach") return h.agentDetach();
       return { ok: false, error: "unexpected verb" };
     },
     advance: async (attempt, evidence) => {
@@ -163,7 +181,11 @@ function harness(initial: RetainedCheckpointAttempt) {
     },
     close: async (attempt, outcome) => ({ attempt: keep({ ...attempt, row: { ...attempt.row, phase: "failed",
       failureReport: canonicalCheckpoint({ version: "agentpod.checkpoint-failure-report.v1", outcome, at: "fixture" }) } }), send: true }),
-    retire: async () => { throw new Error("no retirement in this test"); },
+    retire: async (attempt, retirement) => {
+      h.retired.push({ ...retirement, phase: attempt.row.phase });
+      keep({ ...attempt, row: { ...attempt.row, phase: "retired" } });
+      return true;
+    },
   };
   return { ...h, deps, drive: async () => driveCheckpointAttempt(h.latest, h.client, false, deps), get state() { return h; } };
 }
@@ -227,7 +249,9 @@ test("attach sends only the public key and stores no certificate or token", asyn
   expect(parseRemoteState(latestOf(h).row.remote)).toEqual({ publicKeyFingerprint: publicKeyFingerprint(PUBLIC_KEY),
     attachRequestSHA256: createHash("sha256").update(JSON.stringify(sent)).digest("hex"), user: String(CREDENTIAL.user),
     address: String(CREDENTIAL.address), workingDirectory: String(CREDENTIAL.working_directory), validBefore: iso(T0 + 30 * 60_000),
-    agentAttachSent: true, attached: true, detached: false, dirtyTries: 0, resumed: false });
+    agentAttachSent: true, attached: true, detached: false, dirtyTries: 0, resumed: false,
+    // When the stage's bound started, and the session the agent works in: neither is a credential.
+    turnStartedAt: new Date(T0).toISOString(), sessionId: "acps_1" });
 });
 
 test("renewal happens when ten minutes remain and pushes the new certificate to the agent's node", async () => {
@@ -628,4 +652,310 @@ test("a remote turn whose card cannot be read ends the session it opened", async
   await expect(startRemoteTurn({ acp, agent, tenantId: attempt.row.tenantId, client }, attempt, "/bounded/benches/card-1"))
     .rejects.toThrow("board unreachable");
   expect(ended).toEqual(["acps_lost"]);
+});
+
+// ─── lost agents, run ends, restarts, supersede and the detach sweep ────────────────────────────
+
+/** The board's run view once the run ended: reclaimed after its heartbeat lapsed, or blocked through the board tools. */
+const endedView = (attempt: RetainedCheckpointAttempt, status = "reclaimed") => ({
+  run: { runId: attempt.claim.runId, cardId: attempt.claim.cardId, leaseEpoch: attempt.claim.leaseEpoch, status, outcome: null,
+    endedAt: "2026-11-25T12:20:00Z" },
+  card: { id: attempt.claim.cardId, currentRunId: null } });
+
+test("a lost turn stops the heartbeat and leaves the run to be reclaimed", async () => {
+  // The turn ended without the agent ending it (an error, a lost session, a cancel, an unanswered question).
+  for (const lost of ["error", "ended", "cancelled", "unanswered"] as const) {
+    resetRemoteTurnsForTests(); resetCheckpointActivityForTests();
+    const { attempt } = await remoteAttempt();
+    const h = harness(attempt);
+    await h.drive();
+    const beats = h.heartbeats();
+    await h.turn().end(lost, {});
+    for (let pass = 1; pass <= 3; pass++) {
+      h.state.now = T0 + pass * 2 * REMOTE_HEARTBEAT_MS;
+      expect((await h.drive())).toMatchObject({ status: "unreported" });
+    }
+    // Still working, never heartbeated again, and the hub said nothing of its own: SuperPipeline reclaims the run.
+    expect(latestOf(h).row.phase).toBe("working");
+    expect(h.heartbeats()).toBe(beats);
+    expect(h.runVerbs()).toEqual([]);
+    expect(h.state.failure).toBeUndefined();
+    expect(h.state.retired).toEqual([]);
+  }
+  // The agent's node gone offline: the turn looks alive, but its node no longer holds the attachment.
+  resetRemoteTurnsForTests();
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  const beats = h.heartbeats();
+  h.state.status = { state: "refused", code: "unavailable", message: "node offline" };
+  for (let pass = 1; pass <= 3; pass++) { h.state.now = T0 + pass * 2 * REMOTE_HEARTBEAT_MS; await h.drive(); }
+  expect(h.heartbeats()).toBe(beats);
+  expect(h.runVerbs()).toEqual([]);
+  expect(latestOf(h).row.phase).toBe("working");
+});
+
+test("a reclaimed run makes the bench node release and the agent's node detach", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  await h.turn().end("error", {});
+  const lost = h.turn();
+  // Fifteen minutes without a heartbeat: SuperPipeline reclaimed the run. The bench host's node is not sure yet.
+  h.state.now = T0 + 16 * 60_000;
+  h.state.runView = endedView(attempt);
+  h.state.statusReply = { state: "refused", code: "unavailable" };
+  expect((await h.drive()).status).toBe("unreported");
+  // Told: the node's current check now answers stale_owner. Its session is ended and its station detached;
+  // the attempt stays until the bench host's node says it stopped and released.
+  const told = h.calls.findIndex((c) => c.verb === BENCH_COORDINATOR_VERB && c.params.operation === "status");
+  const detached = h.calls.findIndex((c) => c.verb === "bench.remote.detach");
+  expect(told).toBeGreaterThan(-1);
+  expect(detached).toBeGreaterThan(told);
+  expect(h.calls[told]?.node).toBe(attempt.profile.target.node_id);
+  expect(h.calls[detached]?.node).toBe(AGENT_NODE);
+  expect(lost.state.cancelled).toBe(true);
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ detached: true });
+  expect(h.state.retired).toEqual([]);
+  // A pass on which the board does not answer: the detached attempt is not resumed (no turn is in this process).
+  h.state.runView = undefined;
+  expect((await h.drive()).recheckMs).toBeUndefined();
+  expect(h.state.starts).toHaveLength(1);
+  h.state.runView = endedView(attempt);
+  // Next pass: the node stopped the lease (cutting every session), released it and retired its record.
+  h.state.statusReply = { state: "refused", code: "stale_owner" };
+  expect((await h.drive()).status).toBe("released");
+  expect(h.state.retired).toMatchObject([{ reason: "run_ended", by: "hub", phase: "working" }]);
+  expect(String(h.state.retired[0]?.evidence)).toContain("stale_owner");
+  // Detached once; the hub never failed or released the run itself.
+  expect(h.sent("bench.remote.detach")).toHaveLength(1);
+  expect(h.runVerbs()).toEqual([]);
+  expect(h.state.failure).toBeUndefined();
+});
+
+test("a hub restart in working resumes the turn once, then stops heartbeating", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: false, sessionId: "acps_1" });
+  // The restart: this process holds no turn. A permission wait is lost the same way (it is not in the dispatch ledger).
+  resetRemoteTurnsForTests();
+  h.state.now = T0 + 10 * 60_000;
+  expect(await h.drive()).toMatchObject({ status: "unreported", recheckMs: 5_000 });
+  expect(REMOTE_RESUME_PROMPT).toBe("Your previous turn was interrupted; the workspace still holds your work. Continue.");
+  expect(h.state.starts).toHaveLength(2);
+  expect(h.state.starts[1]).toEqual({ cwd: String(CREDENTIAL.working_directory), opening: `${REMOTE_TURN_PREFACE}\n\n${REMOTE_RESUME_PROMPT}` });
+  // The interrupted session is ended first, so two agents never work in one bench.
+  expect(h.state.endedSessions).toEqual(["acps_1"]);
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: true, sessionId: "acps_2" });
+  // The resumed turn is heartbeated as any.
+  const beats = h.heartbeats();
+  h.state.now += REMOTE_HEARTBEAT_MS;
+  await h.drive();
+  expect(h.heartbeats()).toBe(beats + 1);
+  // A second restart: it was resumed once. Nothing opens and nothing is heartbeated; the board reclaims the run.
+  resetRemoteTurnsForTests();
+  for (let pass = 1; pass <= 3; pass++) {
+    h.state.now += REMOTE_HEARTBEAT_MS;
+    expect((await h.drive()).recheckMs).toBeUndefined();
+  }
+  expect(h.state.starts).toHaveLength(2);
+  expect(h.heartbeats()).toBe(beats + 1);
+  expect(h.runVerbs()).toEqual([]);
+  expect(latestOf(h).row.phase).toBe("working");
+});
+
+test("a hub restart resumes only while the station is online and the stage's time limit has time left", async () => {
+  const { attempt } = await remoteAttempt();
+  const offline = harness(attempt);
+  await offline.drive();
+  resetRemoteTurnsForTests();
+  offline.state.stationReady = false;
+  offline.state.now = T0 + 60_000;
+  expect((await offline.drive()).recheckMs).toBeUndefined();
+  expect(offline.state.starts).toHaveLength(1);
+  expect(parseRemoteState(latestOf(offline).row.remote)).toMatchObject({ resumed: false });
+  // Back online, still within the bound: resumed then, and the resumed turn keeps the first turn's bound.
+  offline.state.stationReady = true;
+  offline.state.now = T0 + 50 * 60_000;
+  await offline.drive();
+  expect(offline.state.starts).toHaveLength(2);
+  offline.state.now = T0 + 3600_000;
+  expect((await offline.drive()).recheckMs).toBeUndefined();
+  expect(offline.turn().state.cancelled).toBe(true);
+
+  // A resume whose session cannot open is still the one resume: written before the open.
+  resetRemoteTurnsForTests();
+  const failing = harness((await remoteAttempt()).attempt);
+  await failing.drive();
+  resetRemoteTurnsForTests();
+  const start = failing.deps.remote?.start;
+  if (!failing.deps.remote || !start) throw new Error("no start seam");
+  failing.deps.remote.start = async () => { throw new Error("session refused"); };
+  failing.state.now = T0 + 60_000;
+  expect((await failing.drive()).recheckMs).toBeUndefined();
+  failing.deps.remote.start = start;
+  await failing.drive();
+  expect(failing.state.starts).toHaveLength(1);
+  expect(parseRemoteState(latestOf(failing).row.remote)).toMatchObject({ resumed: true });
+
+  // The bound counts from the first turn's start, retained: a restart gets no fresh one.
+  resetRemoteTurnsForTests();
+  const spent = harness((await remoteAttempt()).attempt);
+  await spent.drive();
+  resetRemoteTurnsForTests();
+  spent.state.now = T0 + 3600_000;
+  expect((await spent.drive()).recheckMs).toBeUndefined();
+  expect(spent.state.starts).toHaveLength(1);
+  expect(parseRemoteState(latestOf(spent).row.remote)).toMatchObject({ resumed: false });
+  expect(spent.heartbeats()).toBe(1);
+
+  // A run the board already ended opens no session either: the drive ends it instead.
+  resetRemoteTurnsForTests();
+  const ended = harness((await remoteAttempt()).attempt);
+  await ended.drive();
+  resetRemoteTurnsForTests();
+  ended.state.now = T0 + 60_000;
+  ended.state.runView = endedView(attempt);
+  expect((await ended.drive()).status).toBe("released");
+  expect(ended.state.starts).toHaveLength(1);
+  expect(ended.state.retired).toMatchObject([{ reason: "run_ended" }]);
+  // No turn in this process: the session the agent last worked in is ended by its retained id.
+  expect(ended.state.endedSessions).toEqual(["acps_1"]);
+});
+
+test("a run blocked through board tools ends without a checkpoint and detaches", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  // The agent blocked the card with the board tools, then ended its turn.
+  h.state.runView = endedView(attempt, "blocked");
+  await h.turn().end("end_turn", { summary: "Blocked: the spec is ambiguous." });
+  const result = await h.drive();
+  // No finish: nothing is checkpointed. The run end path tells the node, detaches and retires.
+  expect(h.sent(BENCH_COORDINATOR_VERB, "finish")).toHaveLength(0);
+  expect(h.state.phases).not.toContain("finish_pending");
+  expect(h.sent(BENCH_COORDINATOR_VERB, "status")).toHaveLength(1);
+  expect(h.sent("bench.remote.detach")).toHaveLength(1);
+  expect(h.state.retired).toMatchObject([{ reason: "run_ended", phase: "working" }]);
+  expect(result.status).toBe("released");
+  expect(h.runVerbs()).toEqual([]);
+});
+
+test("superseded remote attempt detaches", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  const working = h.turn();
+  const resolution = await resolveSupersededAttempt(latestOf(h), {
+    status: async () => ({ state: "refused", code: "stale_owner" }),
+    retire: async () => { throw new Error("an attempt past admission is never retired as superseded"); },
+    detach: (a) => endRemoteWork(a, h.deps, "The bench stage's profile was replaced.") });
+  // Still parked for an owner or admin (an effect is possible), but the agent stopped and its station is detached.
+  expect(resolution).toEqual({ outcome: "parked", reason: "superseded.effect_possible" });
+  expect(working.state.cancelled).toBe(true);
+  expect(h.sent("bench.remote.detach")).toHaveLength(1);
+  expect(h.sent("bench.remote.detach")[0]?.params).toEqual({ stationId: attempt.profile.target.station_id, attemptId: attempt.row.attemptId });
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ detached: true });
+  // A detach the agent's node does not answer is named and left to the sweep; the resolution is the same.
+  resetRemoteTurnsForTests();
+  const again = harness(attempt);
+  await again.drive();
+  again.state.agentDetach = () => ({ ok: false, error: "node offline" });
+  expect(await resolveSupersededAttempt(latestOf(again), { status: async () => ({ state: "unknown" }), retire: async () => false,
+    detach: (a) => endRemoteWork(a, again.deps, "replaced") })).toEqual({ outcome: "parked", reason: "superseded.effect_possible" });
+  expect(parseRemoteState(latestOf(again).row.remote)).toMatchObject({ detached: false });
+  // Even a detach that throws leaves the resolution as it was.
+  expect(await resolveSupersededAttempt(latestOf(again), { status: async () => ({ state: "unknown" }), retire: async () => false,
+    detach: async () => { throw new Error("state unreadable"); } })).toEqual({ outcome: "parked", reason: "superseded.effect_possible" });
+});
+
+test("detach sweep retries until the agent's node answers", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  const state = parseRemoteState(latestOf(h).row.remote);
+  if (!state) throw new Error("no remote state");
+  let n = 0;
+  const row = (phase: string, remote: Record<string, unknown>, one = attempt): RetainedCheckpointAttempt =>
+    ({ ...one, row: { ...one.row, attemptId: `attempt-sweep-${++n}`, phase, remote: canonicalCheckpoint({ ...state, ...remote }) } });
+  const rows = [
+    row("retired", { detached: false }),
+    // An attach whose reply was lost, then the attempt failed: it may still be attached.
+    row("failed", { attached: false, agentAttachSent: true, detached: false }),
+    // Never sent, already detached, or still in progress (it detaches on its own way out): left alone.
+    row("failed", { attached: false, agentAttachSent: false, detached: false }),
+    row("reported", { detached: true }),
+    row("working", { detached: false }),
+  ];
+  const asked: string[] = [];
+  const recorded: Array<{ attemptId: string; remote: string }> = [];
+  let answer: { ok: boolean; data?: unknown; error?: string } = { ok: false, error: "node offline" };
+  const deps = { attempts: async () => rows.filter((r) => !recorded.some((x) => x.attemptId === r.row.attemptId)),
+    request: async (node: string, verb: string, params: unknown) => {
+      asked.push(`${node}:${verb}:${String(asRecord(params).attemptId)}`);
+      return answer;
+    },
+    record: async (a: RetainedCheckpointAttempt, remote: string) => { recorded.push({ attemptId: a.row.attemptId, remote }); return true; } };
+  // The agent's node is offline, then busy: nothing is recorded, the stations stay busy.
+  expect(await sweepRemoteDetach(deps)).toBe(0);
+  answer = { ok: true, data: { state: "refused", code: "unavailable", message: "busy" } };
+  expect(await sweepRemoteDetach(deps)).toBe(0);
+  expect(recorded).toEqual([]);
+  expect(asked).toEqual([1, 2, 1, 2].map((i) => `${AGENT_NODE}:bench.remote.detach:attempt-sweep-${i}`));
+  // It answers: both are recorded detached, and the next sweep asks nothing.
+  answer = { ok: true, data: { state: "detached" } };
+  expect(await sweepRemoteDetach(deps)).toBe(2);
+  expect(recorded.map((r) => [r.attemptId, parseRemoteState(r.remote)?.detached])).toEqual([["attempt-sweep-1", true], ["attempt-sweep-2", true]]);
+  asked.length = 0;
+  expect(await sweepRemoteDetach(deps)).toBe(0);
+  expect(asked).toEqual([]);
+  // A ledger that cannot be read never throws.
+  expect(await sweepRemoteDetach({ ...deps, attempts: async () => { throw new Error("db down"); } })).toBe(0);
+});
+
+test("after a hub restart a dirty retry keeps the stage's one time limit, and opens no session once it is spent", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  h.state.finishReplies.push(reply("finish-refused-dirty"));
+  await h.drive();
+  // The re-attach after the dirty finish cannot reach the agent's node: the retry is still owed.
+  h.state.agentAttach = () => ({ ok: false, error: "request timed out" });
+  await h.turn().end();
+  await h.drive();
+  expect(parseRemoteState(latestOf(h).row.remote)?.retryPrompt).toContain(REMOTE_DIRTY_PROMPT);
+  const attaches = h.sent(BENCH_COORDINATOR_VERB, "attach").length;
+  // The hub restarts after the stage's bound ran out, counted from the first turn's start.
+  resetRemoteTurnsForTests();
+  h.state.agentAttach = undefined;
+  h.state.now = T0 + 3600_000;
+  expect((await h.drive()).recheckMs).toBeUndefined();
+  expect(h.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(attaches);
+  expect(h.state.starts).toHaveLength(1);
+});
+
+test("a re-attach that keeps failing waits before it is tried again", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  h.state.finishReplies.push(reply("finish-refused-dirty"));
+  await h.drive();
+  h.state.agentAttach = () => ({ ok: false, error: "request timed out" });
+  await h.turn().end();
+  await h.drive();
+  const attaches = h.sent(BENCH_COORDINATOR_VERB, "attach").length;
+  // Passes come every few seconds: none asks either node again until the wait is over.
+  for (let pass = 1; pass <= 3; pass++) {
+    h.state.now = T0 + pass * 5_000;
+    await h.drive();
+  }
+  expect(h.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(attaches);
+  expect(h.state.starts).toHaveLength(1);
+  // The wait is over and the agent's node answers: attached again, in a fresh session.
+  h.state.agentAttach = undefined;
+  h.state.now = T0 + REMOTE_REATTACH_RETRY_MS + 1_000;
+  expect(await h.drive()).toMatchObject({ recheckMs: 5_000 });
+  expect(h.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(attaches + 1);
+  expect(h.state.starts).toHaveLength(2);
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ sessionId: "acps_2" });
+  expect(parseRemoteState(latestOf(h).row.remote)?.retryPrompt).toBeUndefined();
 });

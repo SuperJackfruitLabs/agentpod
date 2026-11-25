@@ -15,7 +15,7 @@ import { retainedCheckpointSource } from "./checkpoint-current-decision";
 import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { CheckpointRefused, isRemoteProfile, type CheckpointRefusalReason } from "./checkpoint-profile";
-import { driveRemotePhase, type RemoteSeams } from "./checkpoint-remote";
+import { driveRemotePhase, endRemoteWork, REMOTE_PHASES, type RemoteSeams } from "./checkpoint-remote";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
@@ -240,7 +240,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
  * authenticated missing receipt, because a settlement that landed ends the run too.
  */
 export const RUN_ENDABLE_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "prepared", "source_pending", "admitted",
-  "execute_pending", "completed"]);
+  "execute_pending", "completed", ...REMOTE_PHASES]);
 /** Nothing of the attempt is running: execute was never sent, or (`completed`) the node's run already finished. */
 const NOTHING_RUNNING_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "prepared", "source_pending", "admitted", "completed"]);
 /**
@@ -290,6 +290,7 @@ async function tellNode(attempt: RetainedCheckpointAttempt, deps: CheckpointDriv
  *   named, and is told again on the next pass; past the task's own timeout plus a grace period it ends
  *   `run_ended.unconfirmed`, so one run the board ended cannot hold the station for ever.
  * - `submission_pending` (after an authenticated missing receipt): `run_ended.unsettled`.
+ * - A remote phase: as `execute_pending`, ending `run_ended`; the agent's session is ended and its station detached.
  */
 export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: RunEnded,
   deps: CheckpointDriveDeps = defaultDeps, client?: SuperpipelineClient): Promise<DispatchResult> {
@@ -307,11 +308,14 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
     }
     if (!RUN_ENDABLE_PHASES.has(phase) && phase !== "submission_pending") throw new CheckpointRefused("source", "retained.phase");
     const node = await tellNode(attempt, deps);
+    // A remote stage's agent stops with its run: its session ends and its station is detached (a failed detach is the sweep's).
+    const remote = (REMOTE_PHASES as readonly string[]).includes(phase);
+    if (remote) await endRemoteWork(attempt, deps, "The card's run ended on the board.");
     const terminal = node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code);
     let reason: CheckpointRetirementReason;
     if (phase === "submission_pending") reason = "run_ended.unsettled";
     else if (NOTHING_RUNNING_PHASES.has(phase)) reason = "run_ended";
-    else if (terminal) reason = "run_ended.stopped";
+    else if (terminal) reason = remote ? "run_ended" : "run_ended.stopped";
     // execute_pending committed this row's last update, so updatedAt is when execute was sent at the latest.
     else if (deps.now() >= attempt.row.updatedAt.getTime() + attempt.request.task.timeout_seconds * 1000 + RUN_ENDED_GRACE_MS)
       reason = "run_ended.unconfirmed";

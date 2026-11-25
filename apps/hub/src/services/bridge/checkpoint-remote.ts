@@ -8,17 +8,26 @@
  *   bench's workspace root. Each pass renews the certificate once less than ten minutes remain, and
  *   heartbeats the run at most once a minute, only while the agent is alive and its node still
  *   holds this attempt's attachment. The end of the agent's turn is "done".
- *   The turn is bounded by the stage's task timeout; past it the session is ended and nothing more
- *   is heartbeated or renewed, so the board reclaims the run.
+ *   The turn is bounded by the stage's task timeout, from the first turn's start across dirty retries
+ *   and hub restarts; past it the session is ended and nothing more is heartbeated or renewed, so the
+ *   board reclaims the run. A turn that ends any other way than the agent ending it, or whose
+ *   agent's node stops holding the attachment, is not heartbeated either: the hub never fails or
+ *   releases the run itself. After a hub restart there is no turn: the agent is told to continue in
+ *   a fresh session once (`resumed`), and only while its station is online and the bound has time left.
  * - `finish_pending`: the bench host's node checkpoints, stops and releases (`finish`). A tree with
  *   uncommitted or untracked files is refused `dirty`, after the node fenced every session: the agent
  *   is attached again (a new certificate), given a fresh session and told, twice at most, then the
  *   run fails. A completion goes to `completed` exactly as a one-shot run's does; the station is
  *   detached, and the settlement is today's.
  *
+ * A run the board ended (reclaimed, blocked or failed through the board tools, moved) is the
+ * orchestrator's `endEndedRun`: the bench host's node is told, stops and releases, and
+ * `endRemoteWork` ends the agent's session and detaches its station.
+ *
  * The Hub never holds a lease token or a private key, and keeps no certificate: only the key's
  * fingerprint and where the bench is (checkpoint-remote-state.ts). From its claim until its station
- * is confirmed detached, a remote attempt's station takes no other board work (`stationBenchBusy`).
+ * is confirmed detached, a remote attempt's station takes no other board work (`stationBenchBusy`);
+ * a detach that failed is asked again by the sweep (checkpoint-remote-sweep.ts).
  */
 import { createHash } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
@@ -36,6 +45,7 @@ import { classifySettlementRefusal } from "./checkpoint-refusal";
 import { noteCheckpoint, redact } from "./checkpoint-log";
 import { agentAttachedTo, attachAgent, benchCall, detachAgent, ensureIdentity, type RemoteCallDeps } from "./checkpoint-remote-calls";
 import { canonicalRemoteState, mayBeAttached, parseRemoteState, publicKeyFingerprint, type RemoteState } from "./checkpoint-remote-state";
+import { readRunEnded } from "./checkpoint-run-ended";
 import { REMOTE_TURN_PREFACE, startRemoteTurn, type RemoteTurn, type RemoteTurnDeps, type RemoteTurnEnd } from "./checkpoint-remote-turn";
 import type { DispatchResult } from "./dispatch-types";
 import type { SuperpipelineClient } from "./superpipeline";
@@ -54,6 +64,10 @@ export const REMOTE_RECHECK_MS = 5_000;
 export const REMOTE_DIRTY_PROMPT = "The workspace has uncommitted or untracked files. Commit or remove them, then end your turn.";
 /** The most of the agent's summary the report carries, across its turns (the settlement takes 8192 per value). */
 export const REMOTE_SUMMARY_LIMIT = 8_000;
+/** Said to the agent in the fresh session a hub restart opens, after the preface. */
+export const REMOTE_RESUME_PROMPT = "Your previous turn was interrupted; the workspace still holds your work. Continue.";
+/** After a re-attach failed, how long before it is tried again (each try asks both nodes and opens a session). */
+export const REMOTE_REATTACH_RETRY_MS = 60_000;
 /** From the claim to the finish: a remote attempt in one of these phases holds its station. */
 const HOLDING_PHASES = ["prepare_pending", "prepared", "source_pending", "admitted", ...CHECKPOINT_REMOTE_PHASES];
 
@@ -84,6 +98,8 @@ const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("h
  */
 interface Live { turn: RemoteTurn; lastBeat: number; startedAt: number; end?: RemoteTurnEnd }
 const live = new Map<string, Live>();
+/** When a re-attach that failed may be tried again, per attempt. */
+const reattachAfter = new Map<string, number>();
 const liveKey = (attempt: RetainedCheckpointAttempt) => `${attempt.row.tenantId}\0${attempt.row.attemptId}`;
 function watch(entry: Live): void {
   const done = entry.turn.done;
@@ -93,7 +109,7 @@ function watch(entry: Live): void {
   })();
 }
 /** Test seam: forget every live turn. */
-export function resetRemoteTurnsForTests(): void { live.clear(); }
+export function resetRemoteTurnsForTests(): void { live.clear(); reattachAfter.clear(); }
 
 const meta = (attempt: RetainedCheckpointAttempt) => ({ tenantId: attempt.row.tenantId, boardId: attempt.row.boardId,
   runId: attempt.claim.runId, attemptId: attempt.row.attemptId, phase: attempt.row.phase });
@@ -102,6 +118,15 @@ const running = (attempt: RetainedCheckpointAttempt): DispatchResult => ({ statu
 const said = (message: string) => { const text = redact(message).replace(/\s+/g, " ").trim().slice(0, 200); return text ? `: "${text}"` : ""; };
 /** The stage's own task timeout bounds the agent's work, retries included. */
 const turnBoundMs = (attempt: RetainedCheckpointAttempt) => attempt.request.task.timeout_seconds * 1000;
+/** When the agent's first turn started, as retained. A state without it counts from the claim. */
+function turnStart(attempt: RetainedCheckpointAttempt, state: RemoteState): number {
+  const at = state.turnStartedAt ? Date.parse(state.turnStartedAt) : NaN;
+  return Number.isFinite(at) ? at : attempt.row.createdAt.getTime();
+}
+/** No session is opened once the stage's bound is spent: the attempt parks unheartbeated, and the board reclaims the run. */
+function requireTurnTime(attempt: RetainedCheckpointAttempt, startedAt: number, deps: RemoteDriveDeps): void {
+  if (deps.now() - startedAt >= turnBoundMs(attempt)) throw new CheckpointRefused("uncertain", "remote.turn.timeout");
+}
 
 function requireState(attempt: RetainedCheckpointAttempt): RemoteState {
   const state = parseRemoteState(attempt.row.remote);
@@ -198,12 +223,16 @@ async function certify(attempt: RetainedCheckpointAttempt, deps: RemoteDriveDeps
  * whenever an attach may have applied, the state recording it. A detach that fails or is refused is
  * named, and the station stays busy (`stationBenchBusy`) until a later detach is confirmed.
  */
-async function endRemote(attempt: RetainedCheckpointAttempt, deps: RemoteDriveDeps, seams: RemoteSeams, executor: Executor,
-  reason: string): Promise<RetainedCheckpointAttempt> {
+async function endRemote(attempt: RetainedCheckpointAttempt, deps: Pick<RemoteCallDeps, "request">, seams: Partial<RemoteSeams>,
+  executor: Executor, reason: string): Promise<RetainedCheckpointAttempt> {
   const entry = live.get(liveKey(attempt));
   live.delete(liveKey(attempt));
+  reattachAfter.delete(liveKey(attempt));
   if (entry) await entry.turn.cancel(reason);
   const state = parseRemoteState(attempt.row.remote);
+  // No turn in this process (a hub restart): the session the agent last worked in is ended by its id.
+  if (!entry && state?.sessionId && seams.turn) await seams.turn.acp.endSession(seams.turn.agent.hubUserId, state.sessionId, reason)
+    .catch((error: unknown) => noteCheckpoint("remote", "remote.session.end", meta(attempt), error));
   if (!state || !mayBeAttached(state)) return attempt;
   try {
     const reply = await detachAgent(executor.nodeId, { stationId: executor.stationId, attemptId: attempt.row.attemptId }, deps);
@@ -215,6 +244,18 @@ async function endRemote(attempt: RetainedCheckpointAttempt, deps: RemoteDriveDe
   }
 }
 
+/**
+ * End a remote attempt's work from outside its phases (a run the board ended, a superseded profile):
+ * the agent's session is ended and its station detached when an attach may have applied. Never
+ * throws for a detach: one that fails is named and left to the sweep. A one-shot attempt is unchanged.
+ */
+export async function endRemoteWork(attempt: RetainedCheckpointAttempt, deps: Pick<RemoteCallDeps, "request"> & { remote?: RemoteSeams },
+  reason: string): Promise<RetainedCheckpointAttempt> {
+  const executor = attempt.profile.executor;
+  if (!isRemoteProfile(attempt.profile) || !executor) return attempt;
+  return endRemote(attempt, deps, deps.remote ?? {}, executor, reason);
+}
+
 async function failRemote(attempt: RetainedCheckpointAttempt, refusal: Refusal, deps: RemoteDriveDeps, seams: RemoteSeams,
   executor: Executor): Promise<DriveStep> {
   const ended = await endRemote(attempt, deps, seams, executor, "The remote bench stage failed.");
@@ -223,11 +264,12 @@ async function failRemote(attempt: RetainedCheckpointAttempt, refusal: Refusal, 
 
 /** A fresh session in the bench for the agent (an open session keeps the terminal it started with). */
 async function openTurn(attempt: RetainedCheckpointAttempt, client: SuperpipelineClient, deps: RemoteDriveDeps, seams: RemoteSeams,
-  cwd: string, opening: string, startedAt: number): Promise<void> {
+  cwd: string, opening: string, startedAt: number): Promise<RemoteTurn> {
   const turn = await (seams.start ?? startRemoteTurn)({ ...seams.turn, client }, attempt, cwd, opening);
   const entry: Live = { turn, lastBeat: deps.now(), startedAt };
   live.set(liveKey(attempt), entry);
   watch(entry);
+  return turn;
 }
 
 async function attach(attempt: RetainedCheckpointAttempt, client: SuperpipelineClient, deps: RemoteDriveDeps, seams: RemoteSeams,
@@ -243,11 +285,13 @@ async function attach(attempt: RetainedCheckpointAttempt, client: SuperpipelineC
   });
   if ("refusal" in issued) return failRemote(issued.attempt, issued.refusal, deps, seams, executor);
   const state = requireState(issued.attempt);
+  const startedAt = deps.now();
   const next = await deps.advance(issued.attempt, { phase: "working", remote: canonicalRemoteState({ ...state, ...issued.credential,
-    validBefore: issued.validBefore, attached: true }) });
+    validBefore: issued.validBefore, attached: true, turnStartedAt: new Date(startedAt).toISOString() }) });
+  if (!next.send) return { attempt: next.attempt };
   // Opened only now: an open session keeps the terminal it started with, so it must start attached.
-  if (next.send) await openTurn(next.attempt, client, deps, seams, issued.credential.workingDirectory, REMOTE_TURN_PREFACE, deps.now());
-  return { attempt: next.attempt };
+  const turn = await openTurn(next.attempt, client, deps, seams, issued.credential.workingDirectory, REMOTE_TURN_PREFACE, startedAt);
+  return { attempt: await update(next.attempt, canonicalRemoteState({ ...requireState(next.attempt), sessionId: turn.sessionId })) };
 }
 
 /** The same key and the same bytes again, for a new certificate; the agent's node is given it. */
@@ -276,16 +320,55 @@ async function renew(attempt: RetainedCheckpointAttempt, state: RemoteState, dep
  */
 async function reattach(attempt: RetainedCheckpointAttempt, state: RemoteState, client: SuperpipelineClient, deps: RemoteDriveDeps,
   seams: RemoteSeams, executor: Executor): Promise<DriveStep> {
-  const prior = live.get(liveKey(attempt));
+  const key = liveKey(attempt);
+  const prior = live.get(key);
   if (prior?.turn.alive()) await prior.turn.cancel("The bench fenced this session; the agent continues in a fresh one.");
-  const issued = await recertify(attempt, state, deps, seams, executor, "reattach");
-  if ("refusal" in issued) return failRemote(issued.attempt, issued.refusal, deps, seams, executor);
+  // The stage's one bound, retained: a hub restart since the first turn gets no fresh one.
+  const startedAt = prior?.startedAt ?? turnStart(attempt, state);
+  requireTurnTime(attempt, startedAt, deps);
+  // A re-attach that failed asks both nodes and opens a session: it waits before the next try.
+  const after = reattachAfter.get(key);
+  if (after !== undefined && deps.now() < after) return { result: running(attempt) };
+  try {
+    const issued = await recertify(attempt, state, deps, seams, executor, "reattach");
+    if ("refusal" in issued) return failRemote(issued.attempt, issued.refusal, deps, seams, executor);
+    const update = seams.update ?? updateCheckpointRemote;
+    let current = await update(issued.attempt, canonicalRemoteState({ ...requireState(issued.attempt), validBefore: issued.validBefore }));
+    const opening = [REMOTE_TURN_PREFACE, state.retryPrompt, state.summary ? `Your earlier turn reported: ${state.summary}` : undefined]
+      .filter((part): part is string => !!part).join("\n\n");
+    const turn = await openTurn(current, client, deps, seams, state.workingDirectory, opening, startedAt);
+    current = await update(current, canonicalRemoteState({ ...without(requireState(current), "retryPrompt"), sessionId: turn.sessionId }));
+    reattachAfter.delete(key);
+    return { result: running(current) };
+  } catch (error) {
+    reattachAfter.set(key, deps.now() + REMOTE_REATTACH_RETRY_MS);
+    throw error;
+  }
+}
+
+/**
+ * A hub restart left a working attempt with no turn in this process (a permission wait included: it
+ * is not in the dispatch ledger). Once, while the station is online and the stage's bound has time
+ * left, the agent is told to continue in a fresh session; the session it worked in is ended first.
+ * Otherwise nothing is heartbeated, as for a lost agent, and the board reclaims the run.
+ */
+async function resume(attempt: RetainedCheckpointAttempt, state: RemoteState, client: SuperpipelineClient, deps: RemoteDriveDeps,
+  seams: RemoteSeams, executor: Executor): Promise<DriveStep> {
+  const startedAt = turnStart(attempt, state);
+  requireTurnTime(attempt, startedAt, deps);
+  if (state.resumed) throw new CheckpointRefused("uncertain", "remote.turn.absent");
+  // A run the board ended takes no new session: the drive ends it (`endEndedRun`).
+  if (await readRunEnded(client, attempt.claim)) throw new CheckpointRefused("uncertain", "remote.run_ended");
+  const { acp, agent } = seams.turn;
+  const station = await acp.stationReady({ stationId: executor.stationId, tenantId: attempt.row.tenantId, userId: agent.hubUserId });
+  if (!station.ready) throw new CheckpointRefused("uncertain", "remote.turn.absent");
   const update = seams.update ?? updateCheckpointRemote;
-  let current = await update(issued.attempt, canonicalRemoteState({ ...requireState(issued.attempt), validBefore: issued.validBefore }));
-  const opening = [REMOTE_TURN_PREFACE, state.retryPrompt, state.summary ? `Your earlier turn reported: ${state.summary}` : undefined]
-    .filter((part): part is string => !!part).join("\n\n");
-  await openTurn(current, client, deps, seams, state.workingDirectory, opening, prior?.startedAt ?? deps.now());
-  current = await update(current, canonicalRemoteState(without(requireState(current), "retryPrompt")));
+  // Written first: however this pass ends, the turn is resumed at most once.
+  let current = await update(attempt, canonicalRemoteState({ ...state, resumed: true }));
+  if (state.sessionId) await acp.endSession(agent.hubUserId, state.sessionId, "The hub restarted; the agent continues in a fresh session.")
+    .catch((error: unknown) => noteCheckpoint("remote", "remote.session.end", meta(attempt), error));
+  const turn = await openTurn(current, client, deps, seams, state.workingDirectory, `${REMOTE_TURN_PREFACE}\n\n${REMOTE_RESUME_PROMPT}`, startedAt);
+  current = await update(current, canonicalRemoteState({ ...requireState(current), sessionId: turn.sessionId }));
   return { result: running(current) };
 }
 
@@ -293,10 +376,12 @@ async function work(initial: RetainedCheckpointAttempt, client: SuperpipelineCli
   executor: Executor): Promise<DriveStep> {
   let attempt = initial;
   let state = requireState(attempt);
+  // Detached (its run ended, or its profile was replaced): the agent's work here is over, and nothing resumes it.
+  if (state.detached) throw new CheckpointRefused("uncertain", "remote.detached");
   if (state.retryPrompt !== undefined) return reattach(attempt, state, client, deps, seams, executor);
   const entry = live.get(liveKey(attempt));
-  // No turn here: the hub restarted while the agent worked. Nothing is heartbeated, so the board reclaims the run.
-  if (!entry) throw new CheckpointRefused("uncertain", "remote.turn.absent");
+  // No turn here: the hub restarted while the agent worked.
+  if (!entry) return resume(attempt, state, client, deps, seams, executor);
   const now = deps.now();
   // Past the stage's bound the session is ended: nothing more is heartbeated or renewed, and the board reclaims the run.
   if (!entry.end && now - entry.startedAt >= turnBoundMs(attempt)) {
@@ -304,6 +389,9 @@ async function work(initial: RetainedCheckpointAttempt, client: SuperpipelineCli
     entry.end = { stopReason: "timeout", handoff: {} };
   }
   if (entry.end?.stopReason === "end_turn") {
+    // An agent that blocked or failed the run through the board tools ended it: no checkpoint is made.
+    // Parked here, the drive reads the same answer and ends the run (`endEndedRun`), which detaches.
+    if (await readRunEnded(client, attempt.claim)) throw new CheckpointRefused("uncertain", "remote.run_ended");
     const { prepared } = await retainedCheckpointSource(attempt);
     const handoff = { ...entry.end.handoff, ...(state.summary ? { summary: joined(state.summary, entry.end.handoff.summary) } : {}) };
     const next = await deps.advance(attempt, { phase: "finish_pending", remote: canonicalRemoteState({ ...state,

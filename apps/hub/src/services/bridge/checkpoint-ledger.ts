@@ -172,6 +172,22 @@ export async function updateCheckpointRemote(attempt: RetainedCheckpointAttempt,
   return checked(updated);
 }
 
+/**
+ * Record a remote attempt's state after its station was confirmed detached, whatever phase the attempt
+ * has reached (the detach sweep, checkpoint-remote-sweep.ts, works on ended attempts). Compare-and-set
+ * on the phase and the state it was read with; false when the row moved on meanwhile.
+ */
+export async function recordCheckpointRemoteDetached(attempt: RetainedCheckpointAttempt, remote: string): Promise<boolean> {
+  const prior = attempt.row.remote;
+  if (prior === null) throw new CheckpointRefused("source", "remote.state");
+  if (Buffer.byteLength(remote, "utf8") > 262144) throw new CheckpointRefused("invalid", "ledger.size");
+  const [updated] = await db.update(checkpointDispatches).set({ remote, updatedAt: new Date() }).where(and(
+    eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
+    eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase),
+    eq(checkpointDispatches.remote, prior))).returning();
+  return Boolean(updated);
+}
+
 /** Why a retained attempt ended without a report. A closed set; the evidence is stored beside it. */
 export type CheckpointRetirementReason =
   /** Superseded profile; the node, asked by status, holds no record of the attempt. */
@@ -182,7 +198,10 @@ export type CheckpointRetirementReason =
   | "operator"
   /**
    * The board definitively ended the run before execute was sent (or after the node's run already
-   * finished, in `completed`): nothing is running. The node was told to retire its record.
+   * finished, in `completed`): nothing is running. The node was told to retire its record. For a
+   * remote bench stage (attach, work or finish), the bench host's node also answered that it stopped
+   * and released the lease, which cut every session; the agent's station is detached, or left to the
+   * detach sweep.
    */
   | "run_ended"
   /** The board ended the run after execute was sent, and the node's record is terminal: it stopped and released. */

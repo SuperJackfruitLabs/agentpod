@@ -39,6 +39,20 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   `finish` on the retained binding and request bytes. While a station is in a
   remote phase, no roster loop for it claims other board work. Migration 0140
   adds `checkpoint_dispatches.remote` (no certificate, key or token).
+- A remote bench stage survives a lost agent, a run end and a hub restart. A
+  turn that ends without the agent ending it, or whose node stops holding the
+  attachment, is no longer heartbeated, and the hub never fails or releases
+  the run itself: SuperPipeline reclaims it. A run the board ended (reclaimed,
+  or blocked or failed by the agent through the board tools) makes no
+  checkpoint: the bench host's node is told, stops and releases, the agent's
+  session is ended and its station detached, and the attempt is retired
+  `run_ended`. After a hub restart the agent is told once, in a fresh session,
+  to continue, while its station is online and the stage's time limit (which
+  counts from the first turn, across restarts and dirty-tree retries) has time
+  left. A superseded remote attempt detaches too. A detach that did not
+  confirm keeps the station busy until the detach sweep, every five minutes
+  with the bench clearing, gets an answer from the agent's node. A failing
+  re-attach after a dirty tree waits a minute between tries.
 - Node verbs `bench.identity.ensure` and `bench.remote.attach|detach|status`,
   advertised as `bench.remote.attach`: a Hermes station gets its own bench SSH
   key (private half on the node only), and attach writes the bench certificate
