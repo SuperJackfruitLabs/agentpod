@@ -1,13 +1,14 @@
 /** Durable once-only preparation intent. Pending rows never authorize a fresh attempt. */
 import { createHash, randomBytes } from "node:crypto";
 import { createLogger } from "../../utils/logger";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { parseBenchCoordinatorRequest, type BenchCoordinatorRequest } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { checkpointDispatches, type CheckpointDispatchRow } from "../../db/schema/checkpoint-dispatch";
 import { parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint, parseCheckpointJSON } from "./checkpoint-json";
-import { checkpointProfileId, CheckpointRefused, parseCheckpointProfile, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
+import { checkpointProfileId, CheckpointRefused, checkpointStationNode, isRemoteProfile, parseCheckpointProfile,
+  requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
 import { parseCheckpointAuthority, readCheckpointAuthority, type CheckpointAuthority } from "./checkpoint-current";
 
 export type PrepareRequest = Extract<BenchCoordinatorRequest, { operation: "prepare" }>;
@@ -38,7 +39,7 @@ function checked(row: CheckpointDispatchRow): RetainedCheckpointAttempt {
     request.identity.control_grant_id !== authority.authorizationSnapshotId || authority.tenantId !== row.tenantId ||
     authority.sourceTenantId !== profile.sourceTenantId || authority.organizationId !== profile.organizationId ||
     authority.principalId !== profile.occupantPrincipalId || authority.ownerPrincipalId !== profile.ownerPrincipalId ||
-    authority.stationId !== profile.target.station_id || authority.nodeId !== profile.target.node_id ||
+    authority.stationId !== profile.target.station_id || authority.nodeId !== checkpointStationNode(profile) ||
     authority.occupancyEpoch !== profile.occupancyEpoch || authority.agentKey !== profile.agentKey || authority.profileKey !== profile.profileKey ||
     request.task.profile_id !== checkpointProfileId(profile) || canonicalCheckpoint(request.target) !== canonicalCheckpoint(profile.target))
     throw new CheckpointRefused("source", "ledger.row");
@@ -111,9 +112,21 @@ export type CheckpointAdvance =
   | { phase: "execute_pending"; executeRequest: string; executeSHA256: string }
   | { phase: "completed"; completion: string }
   | { phase: "submission_pending"; settlementBody: string; settlementSHA256: string }
-  | { phase: "reported"; settlementReceipt: string };
-const predecessor = { prepared: "prepare_pending", source_pending: "prepared", admitted: "source_pending",
-  execute_pending: "admitted", completed: "execute_pending", submission_pending: "completed", reported: "submission_pending" };
+  | { phase: "reported"; settlementReceipt: string }
+  // A remote stage (checkpoint-remote.ts): attach, work, finish. A dirty tree sends the finish back to work.
+  | { phase: "attach_pending" }
+  | { phase: "working"; remote: string }
+  | { phase: "finish_pending"; remote: string };
+const predecessor: Record<CheckpointAdvance["phase"], readonly string[]> = { prepared: ["prepare_pending"],
+  source_pending: ["prepared"], admitted: ["source_pending"], execute_pending: ["admitted"],
+  completed: ["execute_pending", "finish_pending"], submission_pending: ["completed"], reported: ["submission_pending"],
+  attach_pending: ["admitted"], working: ["attach_pending", "finish_pending"], finish_pending: ["working"] };
+/** A remote stage's own phases. A one-shot attempt never enters one, and a remote one never executes. */
+export const CHECKPOINT_REMOTE_PHASES = ["attach_pending", "working", "finish_pending"] as const;
+const REMOTE_PHASE_SET: ReadonlySet<string> = new Set(CHECKPOINT_REMOTE_PHASES);
+/** Whether the phase belongs to the other execution than the attempt's profile. */
+const foreignPhase = (attempt: RetainedCheckpointAttempt, phase: string) =>
+  isRemoteProfile(attempt.profile) ? phase === "execute_pending" : REMOTE_PHASE_SET.has(phase);
 
 /** Compare-and-set owns the right to send an effect. A raced or replayed
  * transition never grants that right again; every populated cell is immutable.
@@ -121,7 +134,8 @@ const predecessor = { prepared: "prepare_pending", source_pending: "prepared", a
 export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttempt, evidence: CheckpointAdvance): Promise<{
   attempt: RetainedCheckpointAttempt; send: boolean;
 }> {
-  if (attempt.row.phase !== predecessor[evidence.phase]) throw new CheckpointRefused("stale", "ledger.phase");
+  if (!predecessor[evidence.phase].includes(attempt.row.phase) || foreignPhase(attempt, evidence.phase))
+    throw new CheckpointRefused("stale", "ledger.phase");
   for (const [key, value] of Object.entries(evidence)) {
     if (key !== "phase" && (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 262144))
       throw new CheckpointRefused("invalid", "ledger.size");
@@ -139,6 +153,23 @@ export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttemp
   if (!current || Object.entries(evidence).some(([key, value]) => Reflect.get(current.row, key) !== value))
     throw new CheckpointRefused("stale", "ledger.raced");
   return { attempt: current, send: false };
+}
+
+/**
+ * Rewrite a remote attempt's state without moving its phase (a renewal, a dirty-tree retry count, the
+ * attach request it is about to send). Compare-and-set on the phase and the state it was read with:
+ * a pass that raced another is refused `ledger.raced` and changes nothing.
+ */
+export async function updateCheckpointRemote(attempt: RetainedCheckpointAttempt, remote: string): Promise<RetainedCheckpointAttempt> {
+  if (!REMOTE_PHASE_SET.has(attempt.row.phase) && attempt.row.phase !== "completed") throw new CheckpointRefused("stale", "ledger.phase");
+  if (Buffer.byteLength(remote, "utf8") > 262144) throw new CheckpointRefused("invalid", "ledger.size");
+  const prior = attempt.row.remote;
+  const [updated] = await db.update(checkpointDispatches).set({ remote, updatedAt: new Date() }).where(and(
+    eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
+    eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase),
+    prior === null ? isNull(checkpointDispatches.remote) : eq(checkpointDispatches.remote, prior))).returning();
+  if (!updated) throw new CheckpointRefused("stale", "ledger.raced");
+  return checked(updated);
 }
 
 /** Why a retained attempt ended without a report. A closed set; the evidence is stored beside it. */
@@ -259,7 +290,7 @@ export interface CheckpointFailureReport {
 }
 
 /** The only phases that ask the node, so the only ones a node refusal can end. */
-export const NODE_REFUSABLE_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "execute_pending"]);
+export const NODE_REFUSABLE_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "execute_pending", ...CHECKPOINT_REMOTE_PHASES]);
 
 /**
  * Hold a definite node refusal on the attempt, before anything is said to SuperPipeline:

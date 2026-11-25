@@ -8,7 +8,7 @@ function row(): RetainedCheckpointAttempt["row"] {
   return { tenantId: "tenant", boardId: "brd_ABC123", runId: "run_ABC123", leaseEpoch: 7, attemptId: "attempt-fixture",
     profile: "{}", claim: "{}", authority: "authority-1", prepareRequest: "{}", prepareSHA256: "e".repeat(64), phase: "execute_pending",
     prepared: null, source: null, sourceReceipt: null, executeRequest: null, executeSHA256: null, completion: null,
-    settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, createdAt: new Date(0), updatedAt: new Date(0) };
+    settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, remote: null, createdAt: new Date(0), updatedAt: new Date(0) };
 }
 
 test("an unchanged row stays current", () => {
@@ -45,9 +45,9 @@ test("a failed decision stays unavailable when the board says the run is live, c
   expect(asked).toBe(false);
 });
 
-// A remote stage's attach and finish are parsed but not decided yet: `pending` keeps the bench node from
-// issuing a certificate or finishing, and nothing is read for them.
-test("a remote attach or finish check is accepted and answered pending, never current", async () => {
+// A remote stage's attach and finish are decided as execute is (checkpoint-remote-state.ts): an
+// attempt the hub does not hold is never current, and the board is not asked about it.
+test("a remote attach or finish check for an attempt the hub does not hold is never current", async () => {
   const corpus = JSON.parse(readFileSync(join(import.meta.dir, "../../../../../packages/contract/src/fixtures/bench-coordinator-current-v1.json"), "utf8")) as
     { requests: Array<{ name: string; value: { identity: { node_id: string } } }> };
   for (const name of ["remote attach", "remote finish"]) {
@@ -56,6 +56,7 @@ test("a remote attach or finish check is accepted and answered pending, never cu
     const decision = await checkpointCurrentDecision(value.identity.node_id, new TextEncoder().encode(JSON.stringify(value)),
       async () => { throw new Error("the board is not asked"); });
     expect(decision.decision).toBe("refused");
-    expect("code" in decision ? decision.code : undefined).toBe("pending");
+    // No row: `stale_owner` with a database, `unavailable` when there is none to read.
+    expect(["stale_owner", "unavailable"]).toContain("code" in decision ? decision.code : "");
   }
 });

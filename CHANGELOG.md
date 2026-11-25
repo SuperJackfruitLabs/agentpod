@@ -23,6 +23,22 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   (`REMOTE_HARNESS_UNSUPPORTED`). Only the configuration is stored here; the
   remote attempt itself comes in a later change. Migration 0139 adds
   `bench_stages.execution` and `bench_node_id`.
+- The hub runs a `remote` bench stage's attempt. After admission it attaches
+  (`attach_pending`: the station's public key from its node, a certificate
+  from the bench host's node, the station pointed at the bench), then the
+  station's agent works in one ACP turn opened afterwards with the bench's
+  workspace root as its cwd (`working`); the end of that turn is "done". The
+  hub renews the certificate when less than ten minutes remain, and heartbeats
+  the run only while the agent is alive and its node still holds the
+  attachment. `finish_pending` hands the agent's report to the bench host's
+  node, which checkpoints, stops and releases; a tree with uncommitted or
+  untracked files is sent back to the agent twice with SuperBench's own
+  words, then the run fails. The settlement is unchanged: `execution.id` is
+  the lease's remote execution and `workerResultSha256` the digest of the
+  report. The hub's current decision now decides the node's `attach` and
+  `finish` on the retained binding and request bytes. While a station is in a
+  remote phase, no roster loop for it claims other board work. Migration 0140
+  adds `checkpoint_dispatches.remote` (no certificate, key or token).
 - Node verbs `bench.identity.ensure` and `bench.remote.attach|detach|status`,
   advertised as `bench.remote.attach`: a Hermes station gets its own bench SSH
   key (private half on the node only), and attach writes the bench certificate

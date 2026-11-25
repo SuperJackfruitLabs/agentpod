@@ -130,7 +130,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     stationKey,
     harness,
     mode,
-    workspacePath: workspacePath ?? null,
+    workspacePath: input.cwd ?? workspacePath ?? null,
     mcpProxyRequested,
     mcpServers: input.mcpServers,
   });

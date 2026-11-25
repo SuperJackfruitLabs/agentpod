@@ -12,6 +12,7 @@ import { noteCheckpoint } from "./checkpoint-log";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseCheckpointSource, parseSourceReceipt, requireActiveSource, type CheckpointSourceSnapshot } from "./checkpoint-source";
 import { readRunEnded } from "./checkpoint-run-ended";
+import { remoteDecision } from "./checkpoint-remote-state";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: Uint8Array) => createHash("sha256").update(raw).digest("hex");
@@ -93,9 +94,6 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array,
   let matched: RetainedCheckpointAttempt | undefined;
   try {
     if (nodeId !== request.identity.node_id || nodeId !== request.target.node_id) return refused("unauthorized");
-    // A remote stage's attach or finish (the bench node's remote-v1 launch). The hub does not decide these
-    // yet: `pending` keeps the node from issuing a certificate or finishing until it does.
-    if (request.phase === "attach" || request.phase === "finish") return refused("pending");
     const attempt = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
     if (!attempt || canonicalCheckpoint(request.identity) !== canonicalCheckpoint(attempt.request.identity) ||
       canonicalCheckpoint(request.target) !== canonicalCheckpoint(attempt.request.target) ||
@@ -111,7 +109,10 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array,
     if (!checkpointAuthorityMatches(authority, attempt.row.authority)) return refused("stale_owner");
     let expires = Date.now() + 5000;
     let active: { snapshot: CheckpointSourceSnapshot; source: ReturnType<typeof parseCheckpointSource> } | undefined;
-    if (request.phase === "execute" || attempt.row.sourceReceipt !== null) {
+    // A remote stage's attach or finish (the bench node's remote-v1 launch) is decided as execute is: on
+    // the admitted source, the retained binding and the exact request bytes the Hub retained for it.
+    const remote = request.phase === "attach" || request.phase === "finish" ? request.phase : undefined;
+    if (request.phase === "execute" || remote || attempt.row.sourceReceipt !== null) {
       const { prepared, source } = await retainedCheckpointSource(attempt);
       if (!attempt.row.source || !attempt.row.sourceReceipt || canonicalCheckpoint(source) !== attempt.row.source)
         return refused("pending");
@@ -127,6 +128,11 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array,
         if (execution.operation !== "execute" || execution.binding_sha256 !== prepared.binding_sha256 ||
           canonicalCheckpoint(execution.source_receipt) !== canonicalCheckpoint({ run_id: receipt.runId, epoch: receipt.leaseEpoch,
             source_digest: receipt.sourceDigest, admitted_at: receipt.admittedAt })) return refused("stale_owner");
+      }
+      if (remote) {
+        // Its binding was matched to the retained preparation above (a mismatch is a stale owner).
+        const decided = remoteDecision(attempt, remote, request.execute_request_sha256, prepared.binding_sha256);
+        if (decided) return refused(decided);
       }
       const evidence = await createCheckpointServiceClient(attempt.profile).sourceEvidence(attempt.claim);
       if (request.phase !== "observe") { requireActiveSource(evidence.snapshot, source); active = { snapshot: evidence.snapshot, source }; }

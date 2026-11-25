@@ -75,6 +75,12 @@ export interface CreateSessionInput {
    * copied from a request body.
    */
   resumeFrom?: string;
+  /**
+   * The session's working directory, in place of the station's workspace. Trusted bridge field, never
+   * copied from a request body: a remote bench stage opens its session in the card's bench, which the
+   * station's terminal reaches over SSH.
+   */
+  cwd?: string;
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
   executionRun?: SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;

@@ -108,6 +108,12 @@ export type CheckpointRefusalReason =
   | "run_ended.node_unreachable" | `run_ended.node:${string}`
   /** Current authority no longer equals the attempt's retained authority. */
   | "authority.changed"
+  /**
+   * A remote stage's phase could not go on (checkpoint-remote.ts): `remote.<step>[.<code>]`, where the
+   * step is closed (`identity`, `attach`, `agent_attach`, `renew`, `finish`, `turn`, `state`) and the
+   * code is the contract's closed refusal enum.
+   */
+  | `remote.${string}`
   /** The roster/occupancy facts changed between the two reads of one authority check. */
   | "authority.raced"
   /**
@@ -213,6 +219,16 @@ export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim:
 /** Whether the stage's agent works in the bench from its own node (`executor`), not as a one-shot task on the bench host. */
 export function isRemoteProfile(p: CheckpointProfile): boolean {
   return p.executor?.execution === "remote";
+}
+
+/**
+ * The node the stage's station runs on: for a one-shot stage the bench host's (`target.node_id`); for
+ * a remote stage the station's own (`executor.nodeId`), which is not the bench host's. Every check of
+ * the station's facts reads this; every check of the bench (registry, binding, settlement) reads
+ * `target.node_id`.
+ */
+export function checkpointStationNode(p: CheckpointProfile): string {
+  return p.executor?.execution === "remote" ? p.executor.nodeId : p.target.node_id;
 }
 
 /** Select the Node coordinator independently of the bridge harness profile. */

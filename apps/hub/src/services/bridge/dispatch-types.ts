@@ -49,6 +49,8 @@ export interface AcpPort {
     mode: AcpSessionMode;
     mcpServers?: AcpMcpServer[];
     mcpProxy?: boolean;
+    /** The session's working directory in place of the station's workspace (a remote bench stage). */
+    cwd?: string;
     executionRun?: SalaamRunAuthority;
     validateExecutionRun?: () => Promise<unknown>;
   }): Promise<{ id: string; libraryTools?: boolean }>;
@@ -80,6 +82,12 @@ export interface DispatchDeps {
   checkpoint?: CheckpointDispatchPort;
   /** Where a refused checkpoint selection is reported; rate-limited by the loop. Absent: `log`. */
   checkpointRefused?: CheckpointRefusalLog;
+  /**
+   * Whether a remote bench stage holds the station (checkpoint-remote.ts `stationBenchBusy`): its
+   * terminal points at a bench, so this cycle claims nothing, checkpoint or ordinary. The loop that
+   * owns the attempt still drives it, through its checkpoint recovery. Absent: never busy.
+   */
+  benchBusy?: () => Promise<boolean>;
   /** Test seam: settle a stopped strict run with its known effects preserved, only once Salaam's
    * status says it can prove them; throws otherwise. Defaults to salaam-dispatch's settlement. */
   settleStoppedWork?: (runId: string) => Promise<void>;

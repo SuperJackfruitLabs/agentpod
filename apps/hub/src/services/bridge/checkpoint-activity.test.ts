@@ -41,7 +41,7 @@ function preparePending(): RetainedCheckpointAttempt {
     leaseEpoch: identity.epoch, attemptId: identity.attempt_id, profile: canonicalCheckpoint(profile), claim: canonicalCheckpoint(claim),
     authority: "retained-by-real-ledger", prepareRequest, prepareSHA256: createHash("sha256").update(prepareRequest, "utf8").digest("hex"),
     phase: "prepare_pending", prepared: null, source: null, sourceReceipt: null, executeRequest: null, executeSHA256: null,
-    completion: null, settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null,
+    completion: null, settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, remote: null,
     createdAt: new Date(0), updatedAt: new Date(0) } };
 }
 

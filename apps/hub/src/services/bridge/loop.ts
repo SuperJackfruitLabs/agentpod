@@ -24,6 +24,7 @@ import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./supe
 import { createLogger } from "../../utils/logger";
 import { onWorkAvailable } from "./work-wake";
 import { checkpointRuntimeResolver } from "./checkpoint-port";
+import { stationBenchBusy } from "./checkpoint-remote";
 import { checkpointCycle, createCheckpointRefusalLog } from "./checkpoint-isolation";
 import { createQuietLog } from "./quiet-log";
 
@@ -410,8 +411,10 @@ export async function startSuperpipelineBridge(
       // Looked up at every cycle's start, not once here: a stage changed with `fleet bench stage
       // set` installs a new profile with no restart, and a runtime kept from loop start refused it
       // as stale forever. An unavailable snapshot returns no dedicated runtime; ordinary work is unchanged.
-      const dedicated = checkpointRuntimeResolver(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
-        agent.boardId, agent.stationId, agent.key);
+      const tenantId = agent.tenantId ?? BOOTSTRAP_TENANT_ID;
+      // A remote bench stage's turn runs on this row's station, through the hub's ACP port.
+      const dedicated = checkpointRuntimeResolver(tenantId, agent.boardId, agent.stationId, agent.key,
+        { acp, agent: config, tenantId, mcpUrl });
       // A checkpoint refusal never ends this agent's cycle; it is logged once per reason.
       const checkpointRefused = createCheckpointRefusalLog((m, meta) => log(m, { agent: agent.key, ...meta }));
       const handle = startAgentLoop({
@@ -425,12 +428,14 @@ export async function startSuperpipelineBridge(
             // The roster row's own tenant (W5): the composite FK pins it to its station's, so the
             // ledger rows land where the station lives. A test-seam roster without one is the
             // tenant the roster below is read from.
-            tenantId: agent.tenantId ?? BOOTSTRAP_TENANT_ID,
+            tenantId,
             source: BRIDGE_SOURCE,
             ...(bridgeConfig.ownWorkQuietMs === undefined ? {} : { ownWorkQuietMs: bridgeConfig.ownWorkQuietMs }),
             ...(bridgeConfig.ownWorkTimeoutMs === undefined ? {} : { ownWorkTimeoutMs: bridgeConfig.ownWorkTimeoutMs }),
             log,
             mcpUrl,
+            // While a remote bench stage holds this station, no loop for it claims other board work.
+            benchBusy: () => stationBenchBusy(tenantId, agent.stationId),
           });
         },
         log: (m, meta) => log(m, { agent: agent.key, ...meta }),

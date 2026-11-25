@@ -14,7 +14,8 @@ import { readRunEnded, type RunEnded } from "./checkpoint-run-ended";
 import { retainedCheckpointSource } from "./checkpoint-current-decision";
 import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
-import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-profile";
+import { CheckpointRefused, isRemoteProfile, type CheckpointRefusalReason } from "./checkpoint-profile";
+import { driveRemotePhase, type RemoteSeams } from "./checkpoint-remote";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
@@ -164,6 +165,8 @@ export interface CheckpointDriveDeps {
   now(): number;
   /** The station's capacity backoff (checkpoint-capacity-backoff.ts). Without one, capacity releases are not counted. */
   capacity?: CapacityBackoff;
+  /** A remote bench stage's station: its ACP port and roster row (checkpoint-remote.ts). Without it a remote phase parks. */
+  remote?: RemoteSeams;
 }
 const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
   advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
@@ -410,6 +413,8 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             receipt.sourceDigest !== await checkpointDigest(source)) throw new CheckpointRefused("source", "retained.source_receipt");
           requireActiveSource(await service.source(attempt.claim), source);
           await deps.authority(attempt);
+          // A remote stage never executes: its station's agent attaches and works in the bench instead.
+          if (isRemoteProfile(attempt.profile)) { attempt = (await deps.advance(attempt, { phase: "attach_pending" })).attempt; break; }
           const execution = JSON.stringify(BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "execute",
             identity: attempt.request.identity, target: attempt.request.target, binding_sha256: prepared.binding_sha256,
             source_receipt: { run_id: receipt.runId, epoch: receipt.leaseEpoch, source_digest: receipt.sourceDigest, admitted_at: receipt.admittedAt } }));
@@ -490,6 +495,11 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           // Settled, and the bench stays: one card keeps one bench from stage to stage and across review
           // bounces. It is cleared when the card is done, cancelled or dormant (bench-clearing.ts), never here.
           break;
+        }
+        case "attach_pending": case "working": case "finish_pending": {
+          const remote = await driveRemotePhase(attempt, client, deps);
+          if ("result" in remote) return remote.result;
+          attempt = remote.attempt; break;
         }
         case "failure_pending": {
           // Said on the card while the lease is still ours, then the run is told. A lost reply is told
