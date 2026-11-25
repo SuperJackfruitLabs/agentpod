@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { BenchCoordinatorRequest, benchCoordinatorBindingDigest, parseBenchCoordinatorRequest, parseBenchCoordinatorResponse } from "./bench-coordinator";
+import { BenchCoordinatorAttachRequest, BenchCoordinatorFinishRequest, BenchCoordinatorRemoteCredential, BenchCoordinatorRequest,
+  benchCoordinatorBindingDigest, parseBenchCoordinatorRequest, parseBenchCoordinatorResponse } from "./bench-coordinator";
 import corpus from "./fixtures/bench-coordinator-v1.json";
 const reverse = (v: unknown): unknown => Array.isArray(v) ? v.map(reverse) : v !== null && typeof v === "object"
     ? Object.fromEntries(Object.entries(v).toReversed().map(([k, x]) => [k, reverse(x)])) : v;
@@ -57,4 +58,18 @@ test("handoff own keys remain data and neither mutate input nor prototypes", asy
   expect(r.completion.task.handoff["__proto__"]).toBe("untrusted text");
   expect(Object.getPrototypeOf(r.completion.task.handoff)).toBe(Object.prototype);
   expect(JSON.stringify(c.value)).toBe(original);
+});
+test("attach and finish: the shared corpus the Go wire reads holds their valid and invalid bodies", () => {
+  const named = (n: string) => corpus.requests.find((c) => c.name === n);
+  // Guards a vacuous pass: the loops above run these through Zod exactly as wire_test.go runs them through Go.
+  for (const n of ["attach", "finish", "attach-public-key-at-limit", "attach-public-key-over-limit", "attach-lease_token",
+    "finish-handoff-at-canonical-limit", "finish-handoff-over-canonical-limit", "finish-handoff-non-ascii-over-canonical-limit"])
+    expect(named(n)).toBeDefined();
+  expect(BenchCoordinatorAttachRequest.safeParse(named("attach")?.value).success).toBe(true);
+  expect(BenchCoordinatorFinishRequest.safeParse(named("finish")?.value).success).toBe(true);
+  expect(BenchCoordinatorAttachRequest.safeParse(named("finish")?.value).success).toBe(false);
+  const attached = corpus.responses.find((c) => c.name === "attached")?.value as { credential?: unknown } | undefined;
+  expect(BenchCoordinatorRemoteCredential.safeParse(attached?.credential).success).toBe(true);
+  for (const n of ["attached", "finish-completed", "finish-refused-dirty", "attached-with-lease-token", "finish-completed-other-binding"])
+    expect(corpus.responses.find((c) => c.name === n)).toBeDefined();
 });

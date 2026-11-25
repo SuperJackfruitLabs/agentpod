@@ -158,3 +158,77 @@ func TestEscapedScalarRoundTrip(t *testing.T) {
 }
 
 func refused(err error) bool { return errors.Is(err, ErrInvalid) && err.Error() == ErrInvalid.Error() }
+
+// TestAttachFinishFieldSets pins the remote operations' exact field sets: each
+// named field is required, nothing else is admitted, and the public key is
+// bounded at MaxPublicKey bytes.
+func TestAttachFinishFieldSets(t *testing.T) {
+	c := corpus(t)
+	valid := map[string]json.RawMessage{}
+	for _, v := range c.Requests {
+		if v.Name == "attach" || v.Name == "finish" {
+			valid[v.Name] = v.Value
+		}
+	}
+	want := map[string][]string{
+		"attach": {"version", "operation", "tenant_id", "board_id", "station_id", "identity", "target", "binding_sha256", "public_key"},
+		"finish": {"version", "operation", "tenant_id", "board_id", "station_id", "identity", "target", "binding_sha256", "report"},
+	}
+	for op, names := range want {
+		raw, ok := valid[op]
+		if !ok {
+			t.Fatal("corpus has no", op)
+		}
+		if _, e := ParseRequest(raw); e != nil {
+			t.Fatal(op, e)
+		}
+		var m map[string]any
+		if json.Unmarshal(raw, &m) != nil || len(m) != len(names) {
+			t.Fatalf("%s fixture has %d fields, want %d", op, len(m), len(names))
+		}
+		for _, name := range names {
+			saved := m[name]
+			delete(m, name)
+			out, _ := json.Marshal(m)
+			if _, e := ParseRequest(out); !refused(e) {
+				t.Fatalf("%s without %s accepted", op, name)
+			}
+			m[name] = saved
+		}
+		for _, extra := range []string{"lease_token", "task", "source_receipt", "unknown"} {
+			m[extra] = "x"
+			out, _ := json.Marshal(m)
+			if _, e := ParseRequest(out); !refused(e) {
+				t.Fatalf("%s with %s accepted", op, extra)
+			}
+			delete(m, extra)
+		}
+	}
+	var attach map[string]any
+	_ = json.Unmarshal(valid["attach"], &attach)
+	for size, accept := range map[int]bool{MaxPublicKey: true, MaxPublicKey + 1: false} {
+		attach["public_key"] = "ssh-ed25519 " + strings.Repeat("A", size-len("ssh-ed25519 "))
+		out, _ := json.Marshal(attach)
+		if _, e := ParseRequest(out); (e == nil) != accept {
+			t.Fatalf("public key of %d bytes: accept=%v error=%v", size, accept, e)
+		}
+	}
+	var finish map[string]any
+	_ = json.Unmarshal(valid["finish"], &finish)
+	report := finish["report"].(map[string]any)
+	report["extra"] = "x"
+	out, _ := json.Marshal(finish)
+	if _, e := ParseRequest(out); !refused(e) {
+		t.Fatal("report with an unknown field accepted")
+	}
+	delete(report, "extra")
+	// An attached reply answers only an attach.
+	r, _ := ParseRequest(valid["finish"])
+	for _, v := range c.Responses {
+		if v.Name == "attached" {
+			if _, e := ParseResponse(v.Value, r); !refused(e) {
+				t.Fatal("attached reply accepted for a finish")
+			}
+		}
+	}
+}

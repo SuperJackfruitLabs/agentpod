@@ -12,6 +12,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchjournal"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -44,7 +45,9 @@ type LocalProfile struct {
 	Arguments            []string          `json:"arguments"`
 	Environment          map[string]string `json:"environment"`
 	// Launch selects the worker transport. Empty keeps the grouped context
-	// launch; "registered-v1" opts in to the finite stdin transport.
+	// launch; "registered-v1" opts in to the finite stdin transport;
+	// "remote-v1" runs no worker here: the station's agent works in the bench
+	// from its own node, and the profile has no worker arguments.
 	Launch string `json:"launch,omitempty"`
 }
 type LocalRepository struct {
@@ -141,15 +144,16 @@ func parseRegistry(raw []byte, nodeID string) (Registry, string, error) {
 		target := r.target(p, rawSHA(raw))
 		request := benchcoordinatorwire.Request{Version: benchcoordinatorwire.Version, Operation: "ready", TenantID: p.TenantID, BoardID: p.BoardID, StationID: p.StationID}
 		encoded, _ := json.Marshal(request)
-		if _, err = benchcoordinatorwire.ParseRequest(encoded); err != nil || p.ID == "" || seen[p.ID] || len(p.Arguments) == 0 || len(p.Arguments) > 128 || p.Environment == nil {
+		remote := p.Launch == benchremote.Mode
+		if _, err = benchcoordinatorwire.ParseRequest(encoded); err != nil || p.ID == "" || seen[p.ID] || (len(p.Arguments) == 0) != remote || len(p.Arguments) > 128 || p.Environment == nil {
 			return Registry{}, "", ErrRegistry
 		}
-		if p.Launch != "" && p.Launch != benchlaunch.Mode {
+		if p.Launch != "" && p.Launch != benchlaunch.Mode && !remote {
 			return Registry{}, "", ErrRegistry
 		}
 		seen[p.ID] = true
 		selector := p.TenantID + "\x00" + p.BoardID + "\x00" + p.StationID
-		if selectors[selector] || !benchjournal.PhysicalName(p.Arguments[0]) {
+		if selectors[selector] || !remote && !benchjournal.PhysicalName(p.Arguments[0]) {
 			return Registry{}, "", ErrRegistry
 		}
 		selectors[selector] = true

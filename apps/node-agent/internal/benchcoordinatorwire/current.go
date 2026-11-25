@@ -8,7 +8,10 @@ import (
 const CurrentVersion = "agentpod.bench-coordinator-current.v1"
 const Verb = "bench.coordinator"
 
-// CurrentRequest names an already retained attempt. Neither a request nor a
+// CurrentRequest names an already retained attempt. An execute-phase check
+// names the binding and the exact request it guards: an execute carries its
+// admitted source digest too, a remote attach or finish (which has no source
+// receipt of its own) does not. Neither a request nor a
 // digest creates authority; the authenticated Hub must re-read its actual state.
 type CurrentRequest struct {
 	Version              string   `json:"version"`
@@ -41,7 +44,7 @@ func ParseCurrentRequest(raw []byte) (CurrentRequest, error) {
 		r.BindingSHA256 != "" && !hashes(r.BindingSHA256) || r.SourceDigest != "" && !hashes(r.SourceDigest) ||
 		r.ExecuteRequestSHA256 != "" && !hashes(r.ExecuteRequestSHA256) ||
 		r.SourceDigest != "" && r.BindingSHA256 == "" ||
-		r.Phase == "execute" && (r.BindingSHA256 == "" || r.SourceDigest == "" || r.ExecuteRequestSHA256 == "") {
+		r.Phase == "execute" && (r.BindingSHA256 == "" || r.ExecuteRequestSHA256 == "") {
 		return CurrentRequest{}, ErrInvalid
 	}
 	return r, nil

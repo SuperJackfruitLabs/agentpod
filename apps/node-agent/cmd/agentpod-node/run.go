@@ -13,6 +13,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchbridge"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
@@ -334,7 +335,9 @@ func runCmd() {
 	// Answered whether or not a registry is pinned, so the hub can tell "no registry here"
 	// from "this node predates the verbs".
 	// bench.reclaim: the hub reclaims a settled card's bench (answered "unavailable" with no registry).
-	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability, benchbridge.ReclaimCapability)
+	// bench.remote.credential: a remote-v1 profile's attach and finish (certificates from benchd for
+	// the leases this node holds); answered like every coordinator operation, refused with no registry.
+	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability, benchbridge.ReclaimCapability, benchremote.Capability)
 	// RunWith returns only when ctx is done; shutdown is not an error worth reporting.
 	_ = gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)

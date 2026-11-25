@@ -75,6 +75,8 @@ type record struct {
 	// Parked says why the attempt waits without sending: bench_stuck or
 	// recreate_refused. Status reports it in place of a plain pending.
 	Parked string `json:"parked,omitempty"`
+	// Remote is the remote launch's own state (benchremote): opaque here.
+	Remote json.RawMessage `json:"remote,omitempty"`
 }
 
 func (r *record) step(name string) *step {
@@ -98,7 +100,19 @@ type document struct {
 
 // Journal is the durable per-bench record. One active attempt per bench key:
 // a record that is not active can read its history but never send again.
-type Journal struct{ Root string }
+// Version names the document; empty is the registered launch's own. Another
+// launch that reuses these steps (benchremote) keeps its own root and version.
+type Journal struct {
+	Root    string
+	Version string
+}
+
+func (j Journal) version() string {
+	if j.Version == "" {
+		return journalVersion
+	}
+	return j.Version
+}
 
 var errAbsent = errors.New("registered launch not reserved")
 
@@ -119,10 +133,10 @@ func (j Journal) update(ctx context.Context, key string, fn func(*document) (boo
 		return err
 	}
 	defer unlock()
-	doc := document{Version: journalVersion, BenchKey: key, Records: []record{}}
+	doc := document{Version: j.version(), BenchKey: key, Records: []record{}}
 	raw, err := benchjournal.ReadFile(filepath.Join(j.Root, key+".json"), maxJournal, true)
 	if err == nil {
-		if benchjournal.Decode(raw, &doc) != nil || doc.Version != journalVersion || doc.BenchKey != key {
+		if benchjournal.Decode(raw, &doc) != nil || doc.Version != j.version() || doc.BenchKey != key {
 			return benchdispatch.ErrInvalid
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {

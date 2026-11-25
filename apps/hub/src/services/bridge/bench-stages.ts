@@ -32,6 +32,7 @@ import type {
   BenchStageView,
   BenchStageWorker,
 } from "@agentpod/contract";
+import { NodeCapability } from "@agentpod/contract";
 
 import { db } from "../../db/drizzle";
 import { bridgeAgents } from "../../db/schema/bridge";
@@ -93,7 +94,7 @@ async function stationFacts(tenantId: string, stationId: string): Promise<Statio
 // ─── where the stage runs ────────────────────────────────────────────────────
 
 /** Advertised by a bench host's node that can issue remote bench credentials (launch `remote-v1`). */
-const BENCH_REMOTE_CREDENTIAL = "bench.remote.credential";
+const BENCH_REMOTE_CREDENTIAL = NodeCapability.enum["bench.remote.credential"];
 /** Advertised by an agent's node that can point its station's harness at a remote bench. */
 const BENCH_REMOTE_ATTACH = "bench.remote.attach";
 

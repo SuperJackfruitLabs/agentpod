@@ -36,6 +36,9 @@ func runCall(r record) (call, benchworkspace.FiniteRunRequest, error) {
 // binding. The journal says "sent" before the request leaves; a lost reply is
 // only ever recovered through the receipt, never by sending again.
 func (c Coordinator) Execute(ctx context.Context, spec benchdispatch.SourceSpec, admit benchdispatch.AdmissionGate) (benchcoordinator.Completion, error) {
+	if c.Remote {
+		return benchcoordinator.Completion{}, refuse("unsupported") // a remote launch runs nothing here
+	}
 	if admit == nil {
 		return benchcoordinator.Completion{}, benchdispatch.ErrInvalid
 	}
@@ -286,6 +289,9 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	}
 	id := m.Workspace.BenchID
 	if _, err = c.granted(ctx, spec, id); err != nil {
+		return err
+	}
+	if err = c.stopRemote(ctx, spec, m.Grant.LeaseToken); err != nil {
 		return err
 	}
 	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "release", Key: spec.BenchKey, LeaseToken: m.Grant.LeaseToken}

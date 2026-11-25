@@ -14,6 +14,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -73,12 +74,17 @@ func (h *Handler) check(ctx context.Context, r benchcoordinatorwire.Request, p L
 	}
 	current := benchcoordinatorwire.CurrentRequest{Phase: phase, Identity: *r.Identity, Target: *r.Target, ProfileID: p.ID, PrepareRequestSHA256: intent.PrepareSHA256}
 	if phase == "execute" {
-		if r.SourceReceipt == nil {
+		// An execute names its admitted source receipt; a remote attach or
+		// finish has none of its own and names only its binding and bytes.
+		remote := r.Operation == "attach" || r.Operation == "finish"
+		if r.SourceReceipt == nil && !remote || intent.ExecuteRequest == "" {
 			return ErrCurrent
 		}
 		current.ExecuteRequestSHA256 = rawSHA([]byte(intent.ExecuteRequest))
 		current.BindingSHA256 = r.BindingSHA256
-		current.SourceDigest = r.SourceReceipt.SourceDigest
+		if r.SourceReceipt != nil {
+			current.SourceDigest = r.SourceReceipt.SourceDigest
+		}
 	}
 	if err := h.current.Check(ctx, current); err != nil {
 		if errors.Is(err, ErrStale) && h.installed() == nil {
@@ -167,7 +173,7 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 					return zero, benchdispatch.SourceTask{}, ErrReclaiming
 				case "reclaimed":
 				case "materializing", "initializing":
-					create = p.Launch == benchlaunch.Mode
+					create = p.Launch == benchlaunch.Mode || p.Launch == benchremote.Mode
 				default:
 					create = false
 				}
@@ -204,7 +210,13 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 // call that claimed the effects, or any identical prepare of a registered
 // launch, whose journaled steps make a repeat a resume (see handle).
 func prepareResumes(claimed bool, p LocalProfile) bool {
-	return claimed || p.Launch == benchlaunch.Mode
+	return claimed || journaled(p)
+}
+
+// journaled is a launch whose every step is journaled before it leaves: the
+// registered launch and the remote launch built on its steps.
+func journaled(p LocalProfile) bool {
+	return p.Launch == benchlaunch.Mode || p.Launch == benchremote.Mode
 }
 
 // coordinator is the attempt lifecycle the handler drives. The grouped
@@ -240,6 +252,12 @@ func (h *Handler) manager(r benchcoordinatorwire.Request, p LocalProfile, intent
 			return ErrCurrent
 		}
 		return nil
+	}
+	if p.Launch == benchremote.Mode {
+		// Its own private journal beside the registered one, also 0700.
+		root := benchremote.JournalRoot(h.registry.StateRoot)
+		_ = os.Mkdir(root, 0700)
+		return benchremote.Coordinator{Journal: benchremote.Journal{Root: root}, Producer: h.client, Client: h.client, Repositories: repositories, Current: current}
 	}
 	if p.Launch == benchlaunch.Mode {
 		// A private sibling of the grouped journal; Journal refuses it unless 0700.
@@ -431,6 +449,15 @@ func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw
 	if r.Operation == "status" {
 		return h.status(ctx, r, p, intent)
 	}
+	if r.Operation == "attach" || r.Operation == "finish" {
+		return h.remote(ctx, r, raw, p, intent)
+	}
+	if p.Launch == benchremote.Mode {
+		// A remote launch runs nothing on the bench host; nothing is claimed.
+		response := refused(r.Operation)
+		response.Code = "unsupported"
+		return response, nil
+	}
 	if intent.Spec == nil {
 		return pending(r), ErrIntent
 	}
@@ -481,7 +508,7 @@ func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p 
 		}
 		return refused(r.Operation), ErrCurrent
 	}
-	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || p.Launch != benchlaunch.Mode) {
+	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || !journaled(p)) {
 		return refused(r.Operation), ErrCurrent
 	}
 	m := h.manager(r, p, intent, "observe")

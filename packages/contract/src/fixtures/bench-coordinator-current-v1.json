@@ -408,8 +408,8 @@
       }
     },
     {
-      "name": "execute missing source_digest",
-      "accept": false,
+      "name": "execute without source_digest (a remote attach or finish)",
+      "accept": true,
       "value": {
         "version": "agentpod.bench-coordinator-current.v1",
         "phase": "execute",

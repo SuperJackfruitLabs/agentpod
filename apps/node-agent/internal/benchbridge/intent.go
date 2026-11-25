@@ -71,7 +71,8 @@ func validIntent(i Intent, request benchcoordinatorwire.Request) bool {
 	}
 	return benchsource.ValidSpec(*i.Spec) && i.Spec.Identity == benchdispatch.Identity(*stored.Identity) &&
 		i.Spec.HostID == stored.Target.HostID && i.Spec.WorkerSHA256 == stored.Target.WorkerSHA256 &&
-		len(i.Task.Arguments) > 0 && i.Task.Environment != nil &&
+		// A remote-v1 task has no worker arguments; the registry requires them of every other launch.
+		len(i.Task.Arguments) <= 128 && i.Task.Environment != nil &&
 		i.Spec.TaskSHA256 == benchdispatch.SourceTaskSHA256(*i.Task) && stored.Task != nil &&
 		i.Task.Prompt == stored.Task.Prompt && uint64(i.Task.TimeoutSeconds) == stored.Task.TimeoutSeconds &&
 		i.Task.RepositoryName == stored.Task.RepositoryName

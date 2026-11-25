@@ -11,6 +11,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchjournal"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -326,7 +327,8 @@ func applyChange(r *Registry, c ProfileChange) error {
 		if len(r.Profiles) >= MaxRegistryProfiles {
 			return &Refusal{Code: "full", Message: "the node's registry already holds the most profiles it serves"}
 		}
-		if c.CheckpointRepository == "" || len(c.Repositories) == 0 || len(c.Arguments) == 0 {
+		remote := c.Launch != nil && *c.Launch == benchremote.Mode
+		if c.CheckpointRepository == "" || len(c.Repositories) == 0 || len(c.Arguments) == 0 && !remote {
 			return &Refusal{Code: "invalid_request", Message: "a new profile needs its repositories, checkpoint repository and worker arguments"}
 		}
 		p.Environment = map[string]string{}
@@ -348,6 +350,12 @@ func applyChange(r *Registry, c ProfileChange) error {
 	}
 	if c.Launch != nil {
 		p.Launch = *c.Launch
+	}
+	if p.Launch == benchremote.Mode {
+		// A remote stage runs no worker here. A stage switched from one-shot
+		// on the same node keeps none of its old worker's arguments or
+		// environment: the hub sends only the new launch.
+		p.Arguments, p.Environment = []string{}, map[string]string{}
 	}
 	if index >= 0 {
 		r.Profiles[index] = p

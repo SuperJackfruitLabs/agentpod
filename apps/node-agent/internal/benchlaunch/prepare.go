@@ -216,6 +216,9 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 	if err = observe("checkpoint", cpRequest, reply); err != nil {
 		return zero, err
 	}
+	if c.Remote {
+		return c.bindRemote(ctx, spec, lease, cp, operations)
+	}
 	layout, err := c.observe(ctx, spec, lease, cp, token)
 	if err != nil {
 		return zero, err
