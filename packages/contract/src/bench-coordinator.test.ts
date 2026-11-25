@@ -59,8 +59,8 @@ test("handoff own keys remain data and neither mutate input nor prototypes", asy
   expect(Object.getPrototypeOf(r.completion.task.handoff)).toBe(Object.prototype);
   expect(JSON.stringify(c.value)).toBe(original);
 });
+const named = (n: string) => corpus.requests.find((c) => c.name === n);
 test("attach and finish: the shared corpus the Go wire reads holds their valid and invalid bodies", () => {
-  const named = (n: string) => corpus.requests.find((c) => c.name === n);
   // Guards a vacuous pass: the loops above run these through Zod exactly as wire_test.go runs them through Go.
   for (const n of ["attach", "finish", "attach-public-key-at-limit", "attach-public-key-over-limit", "attach-lease_token",
     "finish-handoff-at-canonical-limit", "finish-handoff-over-canonical-limit", "finish-handoff-non-ascii-over-canonical-limit"])

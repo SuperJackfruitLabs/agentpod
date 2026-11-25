@@ -24,18 +24,25 @@ const replies: Record<string, z.ZodTypeAny> = {
   "bench.remote.status": BenchRemoteStatusReply,
 };
 
+/** The verb's request schema; a verb the fixture names but this table lacks fails the test. */
+const requestFor = (verb: string): z.ZodTypeAny => {
+  const schema = requests[verb];
+  if (!schema) throw new Error(`no request schema for ${verb}`);
+  return schema;
+};
+
 test("every valid request body parses", () => {
-  for (const [verb, body] of Object.entries(fixture.valid)) expect(requests[verb]!.parse(body)).toEqual(body);
+  for (const [verb, body] of Object.entries(fixture.valid)) expect(requestFor(verb).parse(body)).toEqual(body);
 });
 
 test("every invalid request body is refused", () => {
   expect(fixture.invalid.length).toBeGreaterThan(0);
-  for (const c of fixture.invalid) expect([c.verb, c.why, requests[c.verb]!.safeParse(c.params).success]).toEqual([c.verb, c.why, false]);
+  for (const c of fixture.invalid) expect([c.verb, c.why, requestFor(c.verb).safeParse(c.params).success]).toEqual([c.verb, c.why, false]);
 });
 
 test("replies parse, and a refusal parses as every verb's reply", () => {
   for (const [verb, schema] of Object.entries(replies)) {
-    expect(schema.safeParse(fixture.replies[verb as keyof typeof fixture.replies]).success).toBe(true);
+    expect(schema.safeParse(Reflect.get(fixture.replies, verb)).success).toBe(true);
     expect(schema.safeParse(fixture.replies.refused).success).toBe(true);
   }
   expect(BenchRemoteDetachReply.safeParse({ state: "gone" }).success).toBe(false);
