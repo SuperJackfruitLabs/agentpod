@@ -2,6 +2,7 @@ package benchremote
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -31,6 +32,12 @@ func JournalRoot(stateRoot string) string { return filepath.Join(stateRoot, "rem
 
 func (j Journal) launch() benchlaunch.Journal {
 	return benchlaunch.Journal{Root: j.Root, Version: JournalVersion}
+}
+
+// WhileSettled runs fn under the bench's lock, and only while every remote record for key is terminal
+// and none owns the bench (benchlaunch.Journal.WhileSettled). A key with no journal is settled.
+func (j Journal) WhileSettled(ctx context.Context, key string, fn func() error) error {
+	return j.launch().WhileSettled(ctx, key, fn)
 }
 
 // state is what the remote launch journals beside the shared steps.

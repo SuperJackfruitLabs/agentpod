@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -148,6 +149,41 @@ func TestABenchWithAnUnsettledAttemptIsLeftAlone(t *testing.T) {
 	reply, err := h.reclaim(context.Background(), req)
 	if err != nil || reply.State != "refused" || reply.Code != "unsettled" || producer.count("status") != 0 || producer.count("reclaim") != 0 {
 		t.Fatalf("an unsettled bench was touched: %+v %v", reply, err)
+	}
+}
+
+// A remote stage's card keeps its bench in the remote launch's journal; once settled, it is reclaimed too.
+func TestASettledRemoteCardsBenchIsReclaimed(t *testing.T) {
+	h, producer, req := settledHandler(t, "ready", false, benchremote.Mode)
+	reply, err := h.reclaim(context.Background(), req)
+	if err != nil || reply.State != "reclaimed" || producer.count("reclaim") != 1 {
+		t.Fatalf("a remote card's bench was not reclaimed: %+v %v (reclaims %d)", reply, err, producer.count("reclaim"))
+	}
+}
+
+// A card's bench can hold records of either launch (a stage may switch execution between attempts):
+// an unsettled record in either journal keeps it, whichever launch the stage has now.
+func TestAnUnsettledAttemptInEitherJournalKeepsTheBench(t *testing.T) {
+	for _, c := range []struct{ launch, journal, version string }{
+		{benchremote.Mode, "remote", benchremote.JournalVersion},
+		{benchremote.Mode, "registered", "agentpod.registered-launch.v1"},
+		{benchlaunch.Mode, "remote", benchremote.JournalVersion},
+	} {
+		h, producer, req := settledHandler(t, "ready", false, c.launch)
+		stable, _ := json.Marshal([]string{req.TenantID, req.BoardID, req.CardID})
+		key := "cp_" + rawSHA(stable)
+		root := filepath.Join(h.registry.StateRoot, c.journal)
+		if os.Mkdir(root, 0700) != nil {
+			t.Fatal("journal root")
+		}
+		doc, _ := json.Marshal(map[string]any{"version": c.version, "bench_key": key, "active": "attempt-owner", "records": []any{}})
+		if os.WriteFile(filepath.Join(root, key+".json"), doc, 0600) != nil {
+			t.Fatal("journal")
+		}
+		reply, err := h.reclaim(context.Background(), req)
+		if err != nil || reply.State != "refused" || reply.Code != "unsettled" || producer.count("status") != 0 || producer.count("reclaim") != 0 {
+			t.Fatalf("%s stage, %s journal: an unsettled bench was touched: %+v %v", c.launch, c.journal, reply, err)
+		}
 	}
 }
 

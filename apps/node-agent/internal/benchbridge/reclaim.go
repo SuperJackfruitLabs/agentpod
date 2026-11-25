@@ -9,6 +9,7 @@ import (
 	"regexp"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -73,18 +74,24 @@ func (h *Handler) reclaim(ctx context.Context, req ReclaimRequest) (ReclaimReply
 			profile = &h.registry.Profiles[i]
 		}
 	}
-	// Only the registered launch keeps the per-bench journal that proves every attempt settled.
-	if profile == nil || profile.Launch != benchlaunch.Mode {
+	// Only the registered and remote launches keep the per-bench journal that proves every attempt settled.
+	if profile == nil || (profile.Launch != benchlaunch.Mode && profile.Launch != benchremote.Mode) {
 		return ReclaimReply{State: "refused", Code: "unsupported"}, nil
 	}
 	stable, _ := json.Marshal([]string{req.TenantID, req.BoardID, req.CardID})
 	key := "cp_" + rawSHA(stable)
-	root := filepath.Join(h.registry.StateRoot, "registered")
-	_ = os.Mkdir(root, 0700)
+	registered := filepath.Join(h.registry.StateRoot, "registered")
+	remote := benchremote.JournalRoot(h.registry.StateRoot)
+	_ = os.Mkdir(registered, 0700)
+	_ = os.Mkdir(remote, 0700)
+	// A stage can switch execution between a card's attempts, so the bench may hold records of either
+	// launch: both journals must be settled, each under its own lock (taken in this order only here).
 	var reply ReclaimReply
-	err := benchlaunch.Journal{Root: root}.WhileSettled(ctx, key, func() error {
-		reply = h.reclaimSettled(ctx, key)
-		return nil
+	err := benchlaunch.Journal{Root: registered}.WhileSettled(ctx, key, func() error {
+		return benchremote.Journal{Root: remote}.WhileSettled(ctx, key, func() error {
+			reply = h.reclaimSettled(ctx, key)
+			return nil
+		})
 	})
 	return settledOutcome(reply, err), nil
 }
