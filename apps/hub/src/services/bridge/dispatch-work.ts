@@ -19,7 +19,7 @@ import {
   type DispatchKey,
 } from "./ledger";
 import { SUMMARY_LIMIT, type DispatchDeps, type DispatchResult, type TurnEnd } from "./dispatch-types";
-import { assemblePrompt, boardTools } from "./dispatch-prompt";
+import { assemblePrompt, claimedSessionInput } from "./dispatch-prompt";
 import { abort, afterTheBoardWasTold, failStarted, handBack, replay, summarise } from "./dispatch-exits";
 import { driveTurn, newTurn, openSegment, ownWorkSummary, post, startHeartbeat, subscribeTurn, type Turn } from "./dispatch-turn";
 
@@ -58,7 +58,7 @@ async function openClaimed(
   key: DispatchKey,
   occupantForPrompt: () => Promise<string | null>,
 ): Promise<Opened> {
-  const { client, acp, agent, tenantId } = deps;
+  const { client, acp, agent } = deps;
   try {
     await openDispatch({ ...key, agentKey: agent.key, stationId: agent.stationId, leaseEpoch: work.leaseEpoch });
 
@@ -72,16 +72,7 @@ async function openClaimed(
     // ─── the session ────────────────────────────────────────────────────────
     // Always asks for the node's MCP proxy: the node decides (a station its operator named, a
     // harness that takes HTTP MCP servers) and says what it injected.
-    const session = await acp.createSession({
-      stationId: agent.stationId,
-      tenantId,
-      userId: agent.hubUserId,
-      mode: agent.mode,
-      ...(boardTools(deps) ? { mcpServers: boardTools(deps)! } : {}),
-      mcpProxy: true,
-      executionRun: { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch },
-      validateExecutionRun: () => client.heartbeat(work),
-    });
+    const session = await acp.createSession(claimedSessionInput(deps, work, () => client.heartbeat(work)));
     // Rendered after the session opens, because only the open says which tools it carries (S3-R12).
     const text = renderCardPrompt({ ...prompt, libraryTools: session.libraryTools === true });
     return { text, session };
