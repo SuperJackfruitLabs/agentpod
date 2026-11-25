@@ -104,6 +104,10 @@ const seen = {
   runEnded: false,
   /** The bench host's node's answer to `status`, when set (a node told its run ended stops, releases and answers stale_owner). */
   statusReply: undefined as Record<string, unknown> | undefined,
+  /** Runs the hub failed on the board. */
+  failed: [] as string[],
+  /** The agent's node's refusal of the next attach, when set. */
+  attachRefusal: undefined as Record<string, unknown> | undefined,
 };
 let attempt: RetainedCheckpointAttempt;
 let completionFor: Awaited<ReturnType<typeof checkpointNodeObservation>>;
@@ -171,7 +175,7 @@ function agentNodeAnswers() {
     // A new certificate reached the agent's node after the fence: its work lands again.
     if (message.verb === "bench.remote.attach" && seen.reissued) seen.fenced = false;
     const data = message.verb === "bench.identity.ensure" ? { publicKey: PUBLIC_KEY }
-      : message.verb === "bench.remote.attach" ? { state: "attached", validBefore: "2099-01-01T00:00:00Z" }
+      : message.verb === "bench.remote.attach" ? seen.attachRefusal ?? { state: "attached", validBefore: "2099-01-01T00:00:00Z" }
         : message.verb === "bench.remote.status" ? { attemptId: attempt.row.attemptId, validBefore: "2099-01-01T00:00:00Z" }
           : message.verb === "bench.remote.detach" && seen.detach === "detached" ? { state: "detached" } : undefined;
     handleNodeMessage(agentNode, data ? { type: "res", id: message.id, ok: true, data } : { type: "res", id: message.id, ok: false, error: "unknown verb" });
@@ -238,6 +242,9 @@ beforeAll(async () => {
       card: { ...claimFixture.context.card, currentRunId: seen.runEnded ? null : selected.runId },
       stage: { ...claimFixture.context.stage, checkpointPolicy: policy } });
     if (address === base + "/heartbeat") { seen.heartbeats++; return Response.json({ ok: true }); }
+    // A failure is said on the card, then the run is failed: the board ends it.
+    if (address === base + "/activities" || address === base + "/activity") return Response.json({ ok: true });
+    if (address === base + "/fail") { seen.failed.push(selected.runId); seen.runEnded = true; return Response.json({ ok: true }); }
     if (address === base + "/checkpoint-source") {
       if (init?.method === "POST") {
         if (typeof init.body !== "string") throw new Error("expected source bytes");
@@ -603,6 +610,26 @@ test("an operator's retirement of a remote attempt stops its agent and detaches 
     expect(row.phase).toBe("retired");
     expect(parseRemoteState(row.remote)).toMatchObject({ detached: true });
     expect(await stationBenchBusy(tenantId, stationId)).toBe(false);
+  });
+});
+
+test("a remote attempt the agent's node refused is a stale owner to the bench node, which is told so it releases", async () => {
+  await onRun("r7", async () => {
+    seen.attachRefusal = { state: "refused", code: "credential_files", message: "the profile mounts credential files" };
+    try {
+      const client = await checkpointAgentClient(profile);
+      const told = seen.bench.length;
+      expect(await driveCheckpointAttempt(attempt, client, true, deps())).toMatchObject({ status: "failed" });
+      expect(seen.failed).toEqual([selected.runId]);
+      expect((await stored()).phase).toBe("failed");
+      // The bench node's record still holds the lease: it is told, and every check it makes is a stale owner.
+      expect(seen.bench.slice(told).map((c) => c.operation)).toEqual(["prepare", "attach", "status"]);
+      const lastAttach = seen.bench.filter((c) => c.operation === "attach").at(-1)?.params;
+      if (!lastAttach) throw new Error("no attach");
+      expect(await decide("attach", lastAttach)).toEqual({ decision: "refused", code: "stale_owner" });
+      expect(await decide("attach", lastAttach, { phase: "observe", execute_request_sha256: undefined, binding_sha256: undefined }))
+        .toEqual({ decision: "refused", code: "stale_owner" });
+    } finally { seen.attachRefusal = undefined; seen.runEnded = false; }
   });
 });
 

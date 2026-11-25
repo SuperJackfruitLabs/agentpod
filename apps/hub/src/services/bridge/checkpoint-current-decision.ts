@@ -4,7 +4,7 @@ import { BenchCoordinatorCurrentResponse, BenchCoordinatorPrepared, benchCoordin
   parseBenchCoordinatorRequest } from "@agentpod/contract";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./checkpoint-json";
 import { readCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { checkpointProfileId, claimedRepositories, CheckpointRefused } from "./checkpoint-profile";
+import { checkpointProfileId, claimedRepositories, CheckpointRefused, isRemoteProfile } from "./checkpoint-profile";
 import { checkpointProfileSuperseded, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
@@ -104,6 +104,9 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array,
     // profile can ever authorize it again. stale_owner lets the node retire its own record (release
     // what it holds, never run). An unreadable installation stays `unavailable` below.
     if (attempt.row.phase === "retired" || checkpointProfileSuperseded(attempt.profile)) return refused("stale_owner");
+    // A failed remote attempt never attaches or finishes again, and its bench node may still hold the
+    // lease (the agent's node or the hub failed it): stale_owner lets that node release.
+    if (attempt.row.phase === "failed" && isRemoteProfile(attempt.profile)) return refused("stale_owner");
     requireInstalledCheckpointProfile(attempt.profile);
     const authority = await readCheckpointAuthority(attempt.profile);
     if (!checkpointAuthorityMatches(authority, attempt.row.authority)) return refused("stale_owner");
