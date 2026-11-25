@@ -10,6 +10,20 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Added
+
+- `fleet bench stage add|set --execution one-shot|remote --bench-node NODE`: a
+  bench stage chooses how its agent works in the card's bench. `one-shot`, the
+  default for every existing and new stage, is unchanged. A `remote` stage writes
+  its registry profile on the bench node with launch `remote-v1` and no worker,
+  and its checkpoint profile names the station and its own node as `executor`.
+  The hub refuses it when the bench node lacks `bench.remote.credential`
+  (`BENCH_NODE_UNSUPPORTED`), the station's node lacks `bench.remote.attach`
+  (`STATION_NODE_UNSUPPORTED`) or the station is not Hermes
+  (`REMOTE_HARNESS_UNSUPPORTED`). Only the configuration is stored here; the
+  remote attempt itself comes in a later change. Migration 0139 adds
+  `bench_stages.execution` and `bench_node_id`.
+
 ## v0.1.133 — 2026-11-24
 
 ### Added

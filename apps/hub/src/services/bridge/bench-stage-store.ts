@@ -66,6 +66,9 @@ export async function upsertStage(input: {
   const values = {
     tenantId: input.tenantId, name: input.name, boardId: input.profile.target.board_id, stationId: input.profile.target.station_id,
     origin: input.origin, profile: canonicalCheckpoint(input.profile), updatedAt: new Date(),
+    // From the profile, so the columns can never disagree with what is served.
+    execution: input.profile.executor ? "remote" : "one-shot",
+    benchNodeId: input.profile.executor ? input.profile.target.node_id : null,
     ...(input.stageId !== undefined ? { stageId: input.stageId } : {}),
     // Left out, a re-pin of another stage keeps this stage's own choice.
     ...(input.keepBench !== undefined ? { keepBench: input.keepBench } : {}),

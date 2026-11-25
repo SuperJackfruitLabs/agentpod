@@ -73,6 +73,47 @@ func TestBenchStageAddSendsTheWholeStage(t *testing.T) {
 	}
 }
 
+// TestBenchStageAddRemoteSendsExecutionAndBenchNode: a remote stage names its bench node instead of
+// a worker; the request body carries both fields and no worker.
+func TestBenchStageAddRemoteSendsExecutionAndBenchNode(t *testing.T) {
+	bin := build(t)
+	rec := &recorded{}
+	srv := rec.server(t, `{"ok":true}`)
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	_, code := run(t, bin, env, "bench", "stage", "add", "review", "--board", "brd_0123456789abcdef", "--station", "st_1",
+		"--agent", "agt_abc123", "--checkpoint-repo", "app", "--repo", "name=app,provider=forge,repository=o/app,clone=/r/app",
+		"--execution", "remote", "--bench-node", "node_x")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	_, _, _, body, _ := rec.snapshot()
+	want := map[string]any{
+		"name": "review", "boardId": "brd_0123456789abcdef", "stationId": "st_1", "agentId": "agt_abc123", "checkpointRepository": "app",
+		"execution": "remote", "benchNodeId": "node_x",
+		"repositories": []any{map[string]any{"name": "app", "provider": "forge", "repository": "o/app", "cloneUrl": "/r/app"}},
+	}
+	if mustJSON(t, body) != mustJSON(t, want) {
+		t.Errorf("body = %s\nwant   %s", mustJSON(t, body), mustJSON(t, want))
+	}
+	// A remote stage still needs its bench node; one-shot still needs its worker; an unknown execution never leaves the client.
+	for _, extra := range [][]string{{"--execution", "remote"}, {"--execution", "one-shot"}, {"--execution", "elsewhere", "--worker", "/w"}} {
+		_, code := run(t, bin, env, append([]string{"bench", "stage", "add", "review", "--board", "brd_0123456789abcdef", "--station", "st_1",
+			"--agent", "agt_abc123", "--checkpoint-repo", "app", "--repo", "name=app,provider=forge,repository=o/app,clone=/r/app"}, extra...)...)
+		if code != 2 {
+			t.Errorf("%v: exit = %d, want 2", extra, code)
+		}
+	}
+	if _, _, _, _, calls := rec.snapshot(); calls != 1 {
+		t.Errorf("the hub was called %d times, want 1", calls)
+	}
+	if _, code := run(t, bin, env, "bench", "stage", "set", "review", "--execution", "remote", "--bench-node", "node_y"); code != 0 {
+		t.Fatalf("set: exit = %d", code)
+	}
+	if _, _, _, body, _ = rec.snapshot(); mustJSON(t, body) != `{"benchNodeId":"node_y","execution":"remote"}` {
+		t.Errorf("set body %v", body)
+	}
+}
+
 // TestBenchStageSetSendsOnlyWhatWasAsked: moving a stage's board is a PATCH naming the board and
 // nothing else, so the node keeps its repositories and worker as installed.
 func TestBenchStageSetSendsOnlyWhatWasAsked(t *testing.T) {

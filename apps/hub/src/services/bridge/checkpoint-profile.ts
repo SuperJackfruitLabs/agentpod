@@ -36,11 +36,18 @@ const profileSchema = z.object({
   repositorySelection: z.literal("card").optional(),
   /** Only with `card`: what a card that names none gets (printed into the stage's `cardCheckpointPolicy`). */
   defaultRepositories: z.array(name).min(1).max(32).optional(),
+  /**
+   * Absent: a one-shot stage, whose task runs on the bench host (`target.node_id`). `remote`: the
+   * station's agent works in the card's bench from its own node, `nodeId`, while `target.node_id`
+   * stays the bench host's node, which serves the registry profile (launch `remote-v1`).
+   */
+  executor: z.object({ execution: z.literal("remote"), stationId: id, nodeId: id }).strict().optional(),
 }).strict().refine((value) => (value.coordinatorProfileId ?? value.profileKey) !== "").refine((value) => value.repositories.every((member, index) => index === 0 ||
   (value.repositories[index - 1]?.name ?? "") < member.name) &&
   value.repositories.some((member) => member.name === value.checkpointRepository) &&
   new Set(value.repositories.map((member) => member.repositorySHA256)).size === value.repositories.length &&
   new Set(value.repositories.map((member) => member.provider + "/" + member.repository)).size === value.repositories.length)
+  .refine((value) => value.executor === undefined || value.executor.stationId === value.target.station_id)
   .refine((value) => {
     // treaty run-checkpoint-policy.v2's relations: a sorted subset that resolves a start repository.
     const d = value.defaultRepositories;
@@ -140,6 +147,7 @@ export function parseCheckpointProfile(value: unknown): CheckpointProfile {
   for (const member of parsed.data.repositories) Object.freeze(member);
   Object.freeze(parsed.data.repositories);
   Object.freeze(parsed.data.target);
+  if (parsed.data.executor) Object.freeze(parsed.data.executor);
   return Object.freeze(parsed.data);
 }
 /** The first pin a claim breaks, or undefined when it is this profile's claim. Exported for tests. */
@@ -200,6 +208,11 @@ export function claimedRepositories(profile: CheckpointProfile, claim: PendingCh
 export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim: PendingCheckpointClaim): void {
   const reason = claimRefusal(profile, claim);
   if (reason) throw new CheckpointRefused("authority", reason);
+}
+
+/** Whether the stage's agent works in the bench from its own node (`executor`), not as a one-shot task on the bench host. */
+export function isRemoteProfile(p: CheckpointProfile): boolean {
+  return p.executor?.execution === "remote";
 }
 
 /** Select the Node coordinator independently of the bridge harness profile. */

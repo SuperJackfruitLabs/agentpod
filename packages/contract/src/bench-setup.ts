@@ -74,6 +74,15 @@ export const BenchStageWorker = z.object({
 }).strict();
 export type BenchStageWorker = z.infer<typeof BenchStageWorker>;
 
+/**
+ * How a stage's agent works in the card's bench. `one-shot` (the default): the bench host's node
+ * runs the stage's worker as one task. `remote`: the station's agent keeps running on its own node
+ * and works in the bench over SSH, through the bench host's node (`benchNodeId`, launch `remote-v1`).
+ */
+export const BenchStageExecution = z.enum(["one-shot", "remote"]);
+export type BenchStageExecution = z.infer<typeof BenchStageExecution>;
+const nodeId = z.string().min(1).max(200);
+
 const stageFields = {
   boardId: z.string().regex(/^brd_[0-9a-f]{16}$/, "a superpipeline board id looks like brd_<16 hex>"),
   stationId: z.string().min(1).max(200),
@@ -97,7 +106,12 @@ const stageFields = {
   cardsChoose: z.boolean().optional(),
   /** Only with `cardsChoose`: what a card that names none gets (the policy's `defaultRepositories`). */
   defaultRepositories: z.array(name).min(1).max(32).optional(),
-  worker: BenchStageWorker,
+  /** Required for a `one-shot` stage; a `remote` stage runs no worker on the bench host. */
+  worker: BenchStageWorker.optional(),
+  /** `one-shot` (the default) or `remote`. */
+  execution: BenchStageExecution.optional(),
+  /** Only with `remote`: the node whose bench host holds the card's bench. */
+  benchNodeId: nodeId.optional(),
   /** Re-pin the node registry's worker and coordinator digests to the bytes installed now. */
   repin: z.boolean().optional(),
   /** Keep a card's bench after its checkpoint settles, rather than reclaim it (the default). */
@@ -107,6 +121,9 @@ const stageFields = {
 const distinctRepositories = (v: { repositories?: BenchStageRepository[]; checkpointRepository?: string }) =>
   !v.repositories || (new Set(v.repositories.map((r) => r.name)).size === v.repositories.length &&
     new Set(v.repositories.map((r) => `${r.provider}/${r.repository}`)).size === v.repositories.length);
+
+const remoteNeedsBenchNode = (v: { execution?: string; benchNodeId?: string }) =>
+  (v.benchNodeId === undefined) || v.execution === "remote";
 
 const defaultsNeedChoice = (v: { cardsChoose?: boolean; defaultRepositories?: string[] }) =>
   !v.defaultRepositories?.length || v.cardsChoose === true;
@@ -119,6 +136,10 @@ export const BenchStageAddRequest = z.object({
 }).strict()
   .refine(distinctRepositories, "each repository appears once, by name and by OWNER/REPO")
   .refine(defaultsNeedChoice, "default repositories are for a stage whose cards choose (--cards-choose)")
+  .refine((v) => v.execution !== "remote" || v.benchNodeId !== undefined, "a remote stage names its bench node (--bench-node)")
+  .refine(remoteNeedsBenchNode, "--bench-node is for a remote stage (--execution remote)")
+  .refine((v) => (v.execution === "remote") !== (v.worker !== undefined),
+    "a one-shot stage needs its --worker; a remote stage runs no worker on the bench host")
   .refine((v) => v.repositories.some((r) => r.name === v.checkpointRepository), "the checkpoint repository is one of the repositories");
 export type BenchStageAddRequest = z.infer<typeof BenchStageAddRequest>;
 
@@ -135,6 +156,10 @@ export const BenchStageSetRequest = z.object({
   /** Replace the default; an empty list removes it. */
   defaultRepositories: z.array(name).max(32).optional(),
   worker: BenchStageWorker.optional(),
+  /** Switch the stage's execution; `remote` needs a bench node, given here or kept from before. */
+  execution: BenchStageExecution.optional(),
+  /** Move a remote stage's bench to another node. */
+  benchNodeId: nodeId.optional(),
   repin: z.boolean().optional(),
   keepBench: z.boolean().optional(),
   /** Re-derive the hub's pins (occupant, owner, epoch, roster, reporter) and the node's target, changing nothing else. */
@@ -160,6 +185,10 @@ export const BenchStageView = z.object({
   cardsChoose: z.boolean(),
   defaultRepositories: z.array(z.string()).optional(),
   registrySHA256: sha,
+  /** `one-shot`, or `remote`: the station's agent works in the bench from its own node. */
+  execution: BenchStageExecution,
+  /** For `remote`: the bench host's node, which is also `nodeId`. */
+  benchNodeId: z.string().optional(),
   /** Whether the hub never clears this stage's benches (`--keep-bench`), even once a card is done, cancelled or dormant. */
   keepBench: z.boolean(),
   served: BenchStageServed,

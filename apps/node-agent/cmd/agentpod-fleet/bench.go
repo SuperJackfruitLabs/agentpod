@@ -81,6 +81,8 @@ func fleetBenchStage(args []string) {
 	checkpointRepo := fs.String("checkpoint-repo", "", "the repository the harness starts in")
 	worker := fs.String("worker", "", "absolute path of the worker command on the bench host")
 	launch := fs.String("launch", "", "registered-v1 (default) or grouped")
+	execution := fs.String("execution", "", "one-shot (the default: the bench host runs --worker) or remote (the station's agent works in the bench from its own node)")
+	benchNode := fs.String("bench-node", "", "with --execution remote: the node whose bench host holds the card's bench")
 	repin := fs.Bool("repin", false, "re-pin the node registry's worker and coordinator digests to the installed bytes")
 	refresh := fs.Bool("refresh", false, "re-derive the hub's pins and the node's target, changing nothing else (set)")
 	keepBench := fs.Bool("keep-bench", false, "never clear this stage's benches, even once a card is done, cancelled or dormant; --keep-bench=false clears them again (the default)")
@@ -117,8 +119,12 @@ func fleetBenchStage(args []string) {
 	_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 
 	body := map[string]any{}
+	if *execution != "" && *execution != "one-shot" && *execution != "remote" {
+		fmt.Fprintf(os.Stderr, "--execution is one-shot or remote, got %q\n", *execution)
+		os.Exit(2)
+	}
 	for field, v := range map[string]string{"boardId": *board, "stationId": *station, "agentId": *agent, "sourceTenantId": *sourceTenant,
-		"stageId": *stageID, "checkpointRepository": *checkpointRepo} {
+		"stageId": *stageID, "checkpointRepository": *checkpointRepo, "execution": *execution, "benchNodeId": *benchNode} {
 		if v != "" {
 			body[field] = v
 		}
@@ -190,8 +196,13 @@ func fleetBenchStage(args []string) {
 			os.Exit(2)
 		}
 		missing := []string{}
-		for _, f := range []struct{ name, field string }{{"--board", "boardId"}, {"--station", "stationId"}, {"--agent", "agentId"},
-			{"--repo", "repositories"}, {"--checkpoint-repo", "checkpointRepository"}, {"--worker", "worker"}} {
+		required := []struct{ name, field string }{{"--board", "boardId"}, {"--station", "stationId"}, {"--agent", "agentId"},
+			{"--repo", "repositories"}, {"--checkpoint-repo", "checkpointRepository"}, {"--worker", "worker"}}
+		if *execution == "remote" {
+			// A remote stage runs no worker on the bench host; it names the bench host's node instead.
+			required[len(required)-1] = struct{ name, field string }{"--bench-node", "benchNodeId"}
+		}
+		for _, f := range required {
 			if _, ok := body[f.field]; !ok {
 				missing = append(missing, f.name)
 			}

@@ -186,6 +186,7 @@ var adminCommands = []clidoc.Command{
 		Synopsis: "fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N\n" +
 			"                     --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...\n" +
 			"                     --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]\n" +
+			"                     | --execution remote --bench-node NODE\n" +
 			"                     [--cards-choose [--default-repo N ...]]\n" +
 			"                     [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]",
 		Detail: "In order, each step idempotent and each refusal naming the step: the station's roster row for the board " +
@@ -199,7 +200,13 @@ var adminCommands = []clidoc.Command{
 			"`--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply " +
 			"prints the stage's policy under the SuperPipeline stage field it goes in: `checkpointPolicy`, or with " +
 			"`--cards-choose` `cardCheckpointPolicy`, and the steps still manual. " +
-			"`--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.",
+			"`--source-tenant` is needed only for the workspace's first stage. A stage is `one-shot` by default: the bench " +
+			"host's node runs `--worker` as one task. `--execution remote --bench-node NODE` instead has the station's agent, " +
+			"which must be Hermes, work in the card's bench from its own node over SSH; the registry profile is written on " +
+			"NODE with launch `remote-v1` and no worker. The hub refuses it when NODE does not advertise " +
+			"`bench.remote.credential` (`BENCH_NODE_UNSUPPORTED`), the station's node does not advertise `bench.remote.attach` " +
+			"(`STATION_NODE_UNSUPPORTED`), or the station is not Hermes (`REMOTE_HARNESS_UNSUPPORTED`). " +
+			"Missing required flags are named together and exit 2.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name: the node registry profile id and the coordinator profile id"}},
 		Handlers: []string{"fleetBenchStage"},
 		Flags: []clidoc.Flag{
@@ -208,8 +215,10 @@ var adminCommands = []clidoc.Command{
 			{Name: "agent", Arg: "agt_…", Required: true},
 			{Name: "checkpoint-repo", Arg: "N", Required: true},
 			{Name: "repo", Arg: "SPEC", Required: true, Repeatable: true},
-			{Name: "worker", Arg: "PATH", Required: true},
+			{Name: "worker", Arg: "PATH", Usage: "absolute path of the worker command on the bench host; required unless --execution remote"},
 			{Name: "worker-arg", Arg: "A", Repeatable: true},
+			{Name: "execution", Arg: "one-shot|remote"},
+			{Name: "bench-node", Arg: "NODE"},
 			{Name: "env", Arg: "K=V", Repeatable: true},
 			{Name: "launch", Arg: "L"},
 			{Name: "source-tenant", Arg: "tnt_…"},
@@ -228,6 +237,7 @@ var adminCommands = []clidoc.Command{
 		Path: "bench stage set", Summary: "Change one stage; the hub's pins and the node's target are re-derived.",
 		Synopsis: "fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]\n" +
 			"                     [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]\n" +
+			"                     [--execution one-shot|remote] [--bench-node NODE]\n" +
 			"                     [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]\n" +
 			"                     [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]",
 		Detail: "Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to " +
@@ -236,7 +246,9 @@ var adminCommands = []clidoc.Command{
 			"and `--no-default-repo` removes it. `--repin` re-pins the node's worker and " +
 			"coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, " +
 			"roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its " +
-			"`--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by " +
+			"`--repo` list and `--worker` again. `--execution` switches a stage between `one-shot` and `remote` in the same " +
+			"write: a switch to `one-shot` needs `--worker` again, a remote stage's `--bench-node` is kept unless given, and a " +
+			"bench moved to another node needs its `--repo` list again. An attempt already running keeps its retained authority and is retired by " +
 			"the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. " +
 			"A card keeps its bench from stage to stage and across review bounces; the hub clears it (its tree and quota) " +
 			"once the card is done, cancelled or dormant (`BENCH_DORMANT_AFTER_HOURS`, 72 by default). `--keep-bench` " +
@@ -252,6 +264,8 @@ var adminCommands = []clidoc.Command{
 			{Name: "checkpoint-repo", Arg: "N"},
 			{Name: "repo", Arg: "SPEC", Repeatable: true},
 			{Name: "worker", Arg: "PATH"},
+			{Name: "execution", Arg: "one-shot|remote"},
+			{Name: "bench-node", Arg: "NODE"},
 			{Name: "repin"},
 			{Name: "refresh"},
 			{Name: "keep-bench"},

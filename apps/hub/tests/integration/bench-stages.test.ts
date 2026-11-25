@@ -37,9 +37,10 @@ import { stationAudit } from "../../src/db/schema/audit";
 import { adminBenchRouter } from "../../src/routes/admin-bench";
 import { connectionManager, handleNodeMessage } from "../../src/services/broker";
 import { installedCheckpointProfiles } from "../../src/services/bridge/checkpoint-profiles";
-import { parseCheckpointProfile, type CheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
+import { isRemoteProfile, parseCheckpointProfile, type CheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
 import { checkpointRuntime, checkpointRuntimeResolver } from "../../src/services/bridge/checkpoint-port";
 import { reloadStageProfiles } from "../../src/services/bridge/bench-stage-store";
+import { canonicalCheckpoint } from "../../src/services/bridge/checkpoint-json";
 import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
 import { TEST_PLANE } from "../../src/auth/org-plane/config";
 import { fakePlane, fakePlaneJwks, signPlaneToken } from "../helpers/fake-plane";
@@ -51,6 +52,9 @@ const suffix = hex(20);
 const organizationId = "org_" + suffix;
 const tenantId = "fleet_" + suffix, nodeId = "node_" + suffix, stationId = "station_" + suffix;
 const owner = "prn_" + hex(20), occupant = "prn_" + hex(20), reporter = "prn_" + hex(20);
+// A remote stage's station lives on the agent's own node; the bench is on `nodeId`, the fake node below.
+const agentNodeId = "node_agent_" + suffix, remoteStationId = "station_remote_" + suffix, plainStationId = "station_plain_" + suffix;
+const remoteOccupant = "prn_" + hex(20), plainOccupant = "prn_" + hex(20);
 const BOARD = "brd_" + hex(16), BOARD2 = "brd_" + hex(16), LEGACY_BOARD = "brd_" + hex(16);
 const AUDIENCE = "https://staging-app.superpipeline.dev";
 const CLONE = "ssh://git@forge.test:2222/example/app.git";
@@ -114,7 +118,8 @@ const node = {
     if (change) {
       const before = this.profiles.get(change.id);
       const repositories = change.repositories ?? before?.repositories;
-      const args = change.arguments ?? before?.arguments;
+      // A remote-v1 profile runs no worker, so it needs no arguments (Go `registry.go`).
+      const args = change.arguments ?? before?.arguments ?? ((change.launch ?? before?.launch) === "remote-v1" ? [] : undefined);
       const checkpoint = change.checkpoint_repository ?? before?.checkpoint_repository;
       if (!repositories || !args || !checkpoint)
         throw new Error("invalid_request: a new profile needs its repositories, checkpoint repository and worker arguments");
@@ -179,8 +184,9 @@ beforeAll(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "bench-stages-"))); chmodSync(root, 0o700);
   Object.assign(process.env, { ENFORCE_CONTROL_PAIR: "true", PROPOSED_CHECKPOINT_COORDINATOR: "true", SUPERPIPELINE_BASE_URL: AUDIENCE });
   delete process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE;
-  fakePlane.addAgent({ id: occupant }); fakePlane.addHuman({ id: owner, grant: { mayDispatch: [occupant] } });
-  for (const id of [occupant, owner]) must(fakePlane.principals.get(id), "fixture principal").organizationId = organizationId;
+  for (const id of [occupant, remoteOccupant, plainOccupant]) fakePlane.addAgent({ id });
+  fakePlane.addHuman({ id: owner, grant: { mayDispatch: [occupant, remoteOccupant, plainOccupant] } });
+  for (const id of [occupant, remoteOccupant, plainOccupant, owner]) must(fakePlane.principals.get(id), "fixture principal").organizationId = organizationId;
   restorePlane = setOrgPlaneClientForTests({
     ...fakePlane,
     agentToken: async (principal, aud) => ({ expiresIn: 300, accessToken: await signPlaneToken({ sub: principal, principalKind: "agent",
@@ -222,7 +228,7 @@ afterAll(async () => {
   await db.delete(tenants).where(eq(tenants.id, tenantId));
   await reloadStageProfiles();
   await deleteTestUsers([userId]);
-  fakePlane.remove(occupant); fakePlane.remove(owner);
+  for (const id of [occupant, remoteOccupant, plainOccupant, owner]) fakePlane.remove(id);
   rmSync(root, { recursive: true, force: true });
   for (const k of envKeys) { const v = priorEnv[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 });
@@ -285,6 +291,28 @@ describe("a stage set up from the hub", () => {
     // The clone identity and the worker went to the node, and only there.
     expect(node.profiles.get("review")).toMatchObject({ arguments: [WORKER, "--quiet"], launch: "registered-v1",
       repositories: [{ name: "app", repository: CLONE, base: "main", object_format: "sha1" }] });
+  });
+
+  test("one-shot stage profile is unchanged", async () => {
+    // Characterization, against main's profile bytes: a stage added with no execution is one-shot,
+    // and its stored profile has exactly the fields it always had, with no executor.
+    const [row] = await db.select().from(benchStages).where(and(eq(benchStages.tenantId, tenantId), eq(benchStages.name, "review")));
+    const stored = must(row, "review row");
+    expect(JSON.parse(stored.profile)).toEqual({ version: "agentpod.checkpoint-profile.v1", organizationId,
+      sourceTenantId: "tnt_" + suffix.slice(0, 16), sourceOrigin: AUDIENCE, sourceAudience: AUDIENCE, reporterPrincipalId: reporter,
+      ownerPrincipalId: owner, occupantPrincipalId: occupant, agentKey: "review", profileKey: "", coordinatorProfileId: "review",
+      occupancyEpoch: 3,
+      target: { tenant_id: tenantId, board_id: BOARD, agent_id: "agt_" + suffix.slice(0, 12), station_id: stationId, node_id: nodeId,
+        host_id: node.host, registry_sha256: node.digest(), coordinator_implementation_sha256: node.coordinator,
+        execution_mode: "linux-cgroup-v2", bench_protocol: "superbench.v2", worker_version: "agentpod.superbench-worker.v2",
+        worker_sha256: node.worker },
+      repositories: [{ name: "app", repositorySHA256: sha(CLONE), provider: "forge", repository: "example/app", objectFormat: "sha1" }],
+      checkpointRepository: "app" });
+    expect(stored.profile).toBe(canonicalCheckpoint(JSON.parse(stored.profile)));
+    expect(Object.keys(JSON.parse(stored.profile))).not.toContain("executor");
+    expect(Object.keys(stored)).toContain("keepBench");
+    expect((stored as Record<string, unknown>).execution ?? "one-shot").toBe("one-shot");
+    expect((stored as Record<string, unknown>).benchNodeId ?? null).toBeNull();
   });
 
   test("no response, audit row or stored profile carries a clone URL or a worker argument", async () => {
@@ -520,5 +548,151 @@ describe("removing a stage", () => {
     const [roster] = await db.select().from(bridgeAgents).where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, "review")));
     expect(roster).toBeDefined();
     expect((await call("DELETE", "/stages/review")).status).toBe(404);
+  });
+});
+
+/** Whether the database refused a write. */
+async function refused(write: PromiseLike<unknown>): Promise<boolean> {
+  try { await write; return false; } catch { return true; }
+}
+
+describe("a remote stage", () => {
+  const BOARD3 = "brd_" + hex(16), BOARD4 = "brd_" + hex(16);
+  const remoteBody = (over: Record<string, unknown> = {}) => addBody({ name: "remote-review", boardId: BOARD3, stationId: remoteStationId,
+    worker: undefined, execution: "remote", benchNodeId: nodeId, ...over });
+  const Refusal = z.object({ error: z.string(), code: z.string().optional() });
+  // The capabilities are written to the row directly: the contract's hello parse names them only
+  // once the node verbs behind them ship.
+  const capabilities = setNodeCapabilities;
+  const benchCaps = ["posture", "frames.large", "bench.registry.manage"];
+
+  beforeAll(async () => {
+    await db.insert(nodes).values({ id: agentNodeId, tenantId, userId: owner, name: "agent", hostname: "agent", os: "linux", arch: "amd64",
+      secretHash: "x", status: "online", lastSeenAt: new Date() });
+    await capabilities(agentNodeId, ["posture", "bench.remote.attach"]);
+    await db.insert(stations).values([
+      { id: remoteStationId, tenantId, userId: owner, principalId: remoteOccupant, occupancyEpoch: 2, nodeId: agentNodeId,
+        stationKey: "hermes:" + suffix, kind: "leaf", displayName: "remote", harness: "hermes", workspacePath: "/agent" },
+      { id: plainStationId, tenantId, userId: owner, principalId: plainOccupant, occupancyEpoch: 2, nodeId: agentNodeId,
+        stationKey: "opencode:" + suffix, kind: "leaf", displayName: "plain", harness: "opencode", workspacePath: "/agent" },
+    ]);
+  });
+  afterAll(async () => { await capabilities(nodeId, benchCaps); });
+
+  test("remote stage refuses a bench node without bench.remote.credential", async () => {
+    await capabilities(nodeId, benchCaps);
+    const res = await call("POST", "/stages", remoteBody());
+    expect(res.status).toBe(409);
+    expect(Refusal.parse(await res.json()).code).toBe("BENCH_NODE_UNSUPPORTED");
+    expect(node.requests).toEqual([]);
+    expect(await db.select().from(benchStages).where(and(eq(benchStages.tenantId, tenantId), eq(benchStages.name, "remote-review")))).toEqual([]);
+  });
+
+  test("remote stage refuses a non-Hermes station", async () => {
+    await capabilities(nodeId, [...benchCaps, "bench.remote.credential"]);
+    const res = await call("POST", "/stages", remoteBody({ stationId: plainStationId }));
+    expect(res.status).toBe(409);
+    expect(Refusal.parse(await res.json()).code).toBe("REMOTE_HARNESS_UNSUPPORTED");
+    // The station's node must be able to attach its agent, too.
+    await capabilities(agentNodeId, ["posture"]);
+    try {
+      const old = await call("POST", "/stages", remoteBody());
+      expect(old.status).toBe(409);
+      expect(Refusal.parse(await old.json()).code).toBe("STATION_NODE_UNSUPPORTED");
+    } finally { await capabilities(agentNodeId, ["posture", "bench.remote.attach"]); }
+    // A bench node outside the workspace is not one.
+    expect((await call("POST", "/stages", remoteBody({ benchNodeId: "node_elsewhere" }))).status).toBe(404);
+    // The grammar: a remote stage names a bench node and no worker; a one-shot one names no bench node.
+    for (const body of [remoteBody({ benchNodeId: undefined }), remoteBody({ worker: { arguments: [WORKER] } }),
+      addBody({ name: "x", benchNodeId: nodeId }), remoteBody({ execution: "elsewhere" })])
+      expect((await call("POST", "/stages", body)).status).toBe(400);
+    expect(node.requests).toEqual([]);
+  });
+
+  test("remote stage writes the registry on the bench node with launch remote-v1", async () => {
+    const res = await call("POST", "/stages", remoteBody());
+    expect(res.status).toBe(201);
+    const set = SetParams.parse(must(node.requests.find((r) => r.verb === "bench.registry.set"), "registry write").params);
+    const change = must(set.profile, "profile change");
+    expect(change).toMatchObject({ id: "remote-review", station_id: remoteStationId, board_id: BOARD3, launch: "remote-v1" });
+    expect(change.arguments).toBeUndefined();
+    expect(change.environment).toBeUndefined();
+    expect(node.profiles.get("remote-review")).toMatchObject({ launch: "remote-v1", arguments: [] });
+    // The audit row names the node that was asked: the bench node.
+    const audits = await db.select().from(stationAudit).where(and(eq(stationAudit.tenantId, tenantId), eq(stationAudit.stationKey, "hermes:" + suffix)));
+    expect(audits.map((a) => a.nodeId)).toEqual([nodeId]);
+  });
+
+  test("remote stage profile names the executor station and its node", async () => {
+    const profile = must(installedFor("remote-review"), "remote profile");
+    expect(profile.target).toMatchObject({ node_id: nodeId, station_id: remoteStationId, board_id: BOARD3, registry_sha256: node.digest() });
+    expect(profile.executor).toEqual({ execution: "remote", stationId: remoteStationId, nodeId: agentNodeId });
+    expect(isRemoteProfile(profile)).toBe(true);
+    expect(isRemoteProfile(must(installedFor("legacy"), "legacy"))).toBe(false);
+    expect(profile.occupantPrincipalId).toBe(remoteOccupant);
+    const [row] = await db.select().from(benchStages).where(and(eq(benchStages.tenantId, tenantId), eq(benchStages.name, "remote-review")));
+    expect(row).toMatchObject({ execution: "remote", benchNodeId: nodeId, stationId: remoteStationId });
+    // The printed policy keeps the bench node and lists the remote agent's station as its executor.
+    const doctor = z.object({ checkpointPolicy: z.object({ nodeId: z.string(), executors: z.array(z.unknown()) }).loose() })
+      .parse(await (await call("GET", "/doctor?stage=remote-review")).json());
+    expect(doctor.checkpointPolicy).toMatchObject({ nodeId, executors: [{ agentId: "agt_" + suffix.slice(0, 12), stationId: remoteStationId }] });
+    const { stages } = z.object({ stages: z.array(BenchStageView) }).parse(await (await call("GET", "/stages")).json());
+    expect(stages.find((st) => st.name === "remote-review")).toMatchObject({ execution: "remote", benchNodeId: nodeId, nodeId,
+      stationId: remoteStationId, served: "served" });
+    expect(stages.find((st) => st.name === "legacy")).toMatchObject({ execution: "one-shot" });
+    expect(stages.find((st) => st.name === "legacy")?.benchNodeId).toBeUndefined();
+    // Another write on the bench node re-pins it, keeping its executor.
+    expect((await call("PATCH", "/stages/legacy", { refresh: true })).status).toBe(200);
+    expect(installedFor("remote-review")?.executor).toEqual(profile.executor);
+  });
+
+  test("switching execution follows set's repin path, and a one-shot switch needs its worker", async () => {
+    // To one-shot on the station's own node: that node holds no registry, so the worker and repositories are both needed.
+    expect((await call("PATCH", "/stages/remote-review", { execution: "one-shot" })).status).toBe(400);
+    expect((await call("PATCH", "/stages/remote-review", { worker: { arguments: [WORKER] } })).status).toBe(400);
+    expect((await call("PATCH", "/stages/remote-review", { benchNodeId: "node_elsewhere" })).status).toBe(404);
+    expect(node.requests).toEqual([]);
+    // A board move keeps the stage remote and on its bench node.
+    const moved = await call("PATCH", "/stages/remote-review", { boardId: BOARD4 });
+    expect(moved.status).toBe(200);
+    expect(must(installedFor("remote-review"), "moved")).toMatchObject({ target: { board_id: BOARD4, node_id: nodeId },
+      executor: { execution: "remote", stationId: remoteStationId, nodeId: agentNodeId } });
+    const Changed = z.object({ changed: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })) });
+    // The legacy stage on the bench node becomes remote and back: one-shot bytes come back unchanged.
+    await capabilities(nodeId, [...benchCaps, "bench.remote.credential", "bench.remote.attach"]);
+    const before = must(installedFor("legacy"), "legacy");
+    const toRemote = await call("PATCH", "/stages/legacy", { execution: "remote", benchNodeId: nodeId });
+    expect(toRemote.status).toBe(200);
+    expect(Changed.parse(await toRemote.json()).changed.execution).toEqual({ from: "one-shot", to: "remote" });
+    expect(node.profiles.get("legacy")?.launch).toBe("remote-v1");
+    expect(installedFor("legacy")?.executor).toEqual({ execution: "remote", stationId, nodeId });
+    const back = await call("PATCH", "/stages/legacy", { execution: "one-shot", worker: { arguments: ["/usr/local/libexec/legacy-harness"] } });
+    expect(back.status).toBe(200);
+    expect(Changed.parse(await back.json()).changed.execution).toEqual({ from: "remote", to: "one-shot" });
+    expect(node.profiles.get("legacy")?.launch).toBe("registered-v1");
+    const after = must(installedFor("legacy"), "legacy again");
+    expect(after.executor).toBeUndefined();
+    expect(canonicalCheckpoint({ ...after, target: { ...after.target, registry_sha256: "" } }))
+      .toBe(canonicalCheckpoint({ ...before, target: { ...before.target, registry_sha256: "" } }));
+    const [row] = await db.select().from(benchStages).where(and(eq(benchStages.tenantId, tenantId), eq(benchStages.name, "legacy")));
+    expect(row).toMatchObject({ execution: "one-shot", benchNodeId: null });
+  });
+
+  test("migration refuses remote without bench_node_id", async () => {
+    const where = and(eq(benchStages.tenantId, tenantId), eq(benchStages.name, "legacy"));
+    expect(await refused(db.update(benchStages).set({ execution: "remote" }).where(where))).toBe(true);
+    expect(await refused(db.update(benchStages).set({ benchNodeId: nodeId }).where(where))).toBe(true);
+    expect(await refused(db.update(benchStages).set({ execution: "elsewhere", benchNodeId: nodeId }).where(where))).toBe(true);
+    // Both together is a remote stage.
+    expect(await refused(db.update(benchStages).set({ execution: "remote", benchNodeId: nodeId }).where(where))).toBe(false);
+    await db.update(benchStages).set({ execution: "one-shot", benchNodeId: null }).where(where);
+    const [row] = await db.select().from(benchStages).where(where);
+    expect(row).toMatchObject({ execution: "one-shot", benchNodeId: null });
+  });
+
+  test("rm removes a remote stage from its bench node", async () => {
+    expect((await call("DELETE", "/stages/remote-review")).status).toBe(200);
+    expect(node.profiles.has("remote-review")).toBe(false);
+    expect(installedFor("remote-review")).toBeUndefined();
   });
 });
