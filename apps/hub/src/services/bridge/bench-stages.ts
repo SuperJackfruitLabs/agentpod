@@ -31,7 +31,6 @@ import type {
   BenchStageSetRequest,
   BenchStageView,
   BenchStageWorker,
-  NodeCapability,
 } from "@agentpod/contract";
 import { NodeCapability } from "@agentpod/contract";
 
