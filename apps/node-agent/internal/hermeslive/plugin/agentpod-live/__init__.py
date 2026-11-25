@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import posixpath
 import queue
 import re
 import socket
@@ -740,6 +741,10 @@ REPLACE_ALL_BLOCK = (
     "replace_all has no V4A equivalent. Call patch with mode=\"patch\" and a V4A patch with one "
     "hunk per occurrence (each with enough context to be unique), or write_file for a new file."
 )
+OUTSIDE_BLOCK = (
+    "This profile is attached to a remote bench, which exposes only {wd}. The path {path!r} is "
+    "not under it, so the edit was not made. Name a file under {wd}."
+)
 UNEXPRESSIBLE_BLOCK = (
     "This profile is attached to a remote bench, where replace-mode patch cannot run, and this "
     "edit cannot be converted to V4A ({why}). Call patch with mode=\"patch\" and a V4A patch, or "
@@ -793,20 +798,40 @@ def bench_prompt(state: Optional[Dict[str, str]]) -> str:
     )
 
 
-def replace_patch_as_v4a(args: Any) -> Optional[Dict[str, Any]]:
+def bench_path(path: str, working_directory: str) -> Optional[str]:
+    """*path* as the bench sees it, resolved lexically against *working_directory* with ``..``
+    normalised, or None when it is not under *working_directory*. ``~`` is refused rather than
+    expanded: the gateway's home is not the bench's."""
+    if path.startswith("~"):
+        return None
+    root = posixpath.normpath(working_directory)
+    full = posixpath.normpath(path if path.startswith("/") else posixpath.join(root, path))
+    if full == root or full.startswith(root.rstrip("/") + "/"):
+        return full
+    return None
+
+
+def replace_patch_as_v4a(args: Any, working_directory: str) -> Optional[Dict[str, Any]]:
     """The `pre_tool_call` directive for a replace-mode `patch` call, or None to leave it alone.
 
     One V4A update hunk whose removed lines are old_string and whose added lines are new_string
     searches for exactly old_string and replaces it with exactly new_string: the parser joins a
     hunk's lines back with newlines and applies them with the same fuzzy matcher replace mode
     uses, uniqueness rule included. What V4A cannot say is blocked with a message that steers the
-    model to V4A, never passed on to fail at edit approval.
+    model to V4A, never passed on to fail at edit approval. Only a path under the bench's working
+    directory is rewritten, and the V4A header names it resolved; any other path is blocked.
     """
     if not isinstance(args, dict) or (args.get("mode") or "replace") != "replace":
         return None
     path, old, new = args.get("path"), args.get("old_string"), args.get("new_string")
     if not (isinstance(path, str) and path and isinstance(old, str) and isinstance(new, str)):
         return None  # Hermes's own argument errors are clearer than ours.
+    if path != path.strip() or any(c in path for c in "\r\n"):
+        why = "the path has surrounding whitespace or a line break"
+        return {"action": "block", "message": UNEXPRESSIBLE_BLOCK.format(why=why)}
+    resolved = bench_path(path, working_directory)
+    if resolved is None:
+        return {"action": "block", "message": OUTSIDE_BLOCK.format(wd=working_directory, path=path)}
     if args.get("replace_all"):
         return {"action": "block", "message": REPLACE_ALL_BLOCK}
     why = ""
@@ -814,11 +839,9 @@ def replace_patch_as_v4a(args: Any) -> Optional[Dict[str, Any]]:
         why = "old_string is empty"
     elif "\r" in old or "\r" in new:
         why = "the text contains a carriage return, which the V4A parser strips"
-    elif path != path.strip() or any(c in path for c in "\r\n"):
-        why = "the path has surrounding whitespace or a line break"
     if why:
         return {"action": "block", "message": UNEXPRESSIBLE_BLOCK.format(why=why)}
-    lines = ["*** Begin Patch", f"*** Update File: {path}"]
+    lines = ["*** Begin Patch", f"*** Update File: {resolved}"]
     lines += ["-" + line for line in old.split("\n")]
     lines += ["+" + line for line in new.split("\n")]
     lines.append("*** End Patch")
@@ -830,9 +853,12 @@ def register_bench(ctx: Any, home: Callable[[], str] = _hermes_home) -> None:
     the node attaches the profile."""
 
     def pre_tool_call(tool_name: str = "", args: Any = None, **_: Any):
-        if tool_name != "patch" or read_bench_state(home()) is None:
+        if tool_name != "patch":
             return None
-        return replace_patch_as_v4a(args)
+        state = read_bench_state(home())
+        if state is None:
+            return None
+        return replace_patch_as_v4a(args, state["working_directory"])
 
     def section(_info: Any = None) -> str:
         return bench_prompt(read_bench_state(home()))

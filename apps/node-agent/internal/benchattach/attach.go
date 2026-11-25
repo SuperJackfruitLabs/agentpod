@@ -102,7 +102,7 @@ var mu sync.Mutex
 var (
 	attemptPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	userPattern    = regexp.MustCompile(`^b-[a-f0-9]{32}$`)
-	certPattern    = regexp.MustCompile(`^(ssh-ed25519|ecdsa-sha2-nistp256)-cert-v01@openssh\.com [A-Za-z0-9+/]+={0,2}( [^\x00-\x1f]*)?$`)
+	certPattern    = regexp.MustCompile(`^(ssh-ed25519|ecdsa-sha2-nistp256)-cert-v01@openssh\.com [A-Za-z0-9+/]+={0,2}( [ -~]*)?$`)
 	hostKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,2}( [ -~]*)?$`)
 )
 

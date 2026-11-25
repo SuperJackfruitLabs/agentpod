@@ -487,3 +487,73 @@ func TestSweepRecoversACrashBeforeAnyEdit(t *testing.T) {
 		t.Fatal("the leftover record survived")
 	}
 }
+
+// The address host and the host key go into known_hosts. Anything that could widen the pin or
+// add a line is refused before a single file is written.
+func TestAttachRefusesKnownHostsInjection(t *testing.T) {
+	addresses := []string{
+		"x\n@cert-authority * " + hostKey + " c:2222",
+		"evil,*:22",
+		"x,*:22",
+		"*:2222",
+		"bench?.example:2222",
+		"!bench.example:2222",
+		"a@b:2222",
+		"a b:2222",
+		"a\tb:2222",
+		"bench\x00.example:2222",
+		"-bench.example:2222",
+		"bench-.example:2222",
+		"bench..example:2222",
+		strings.Repeat("a.", 127) + "aa:2222", // 256 characters
+		"[fe80::1%eth0]:2222",                 // zone
+		"[100.64.0.9]:2222",                   // IPv4 in brackets
+		"[bench.example]:2222",
+	}
+	for _, address := range addresses {
+		f := newFixture(t)
+		a := attachment("att-1", certA, 30*time.Minute)
+		a.Address = address
+		if _, err := f.m.Attach(context.Background(), a); code(err) != CodeInvalid {
+			t.Errorf("address %q: %v", address, err)
+		}
+		assertUntouched(t, f, profileConfig)
+	}
+	for _, hk := range []string{
+		hostKey + "\n@cert-authority * " + hostKey,
+		hostKey + "\r",
+		hostKey + " comment\x7f",
+		hostKey + " comment\x1b[0m",
+	} {
+		f := newFixture(t)
+		a := attachment("att-1", certA, 30*time.Minute)
+		a.HostKey = hk
+		if _, err := f.m.Attach(context.Background(), a); code(err) != CodeInvalid {
+			t.Errorf("host key %q: %v", hk, err)
+		}
+		assertUntouched(t, f, profileConfig)
+	}
+}
+
+func TestAttachAcceptsIPAndHostnameDoors(t *testing.T) {
+	for address, pattern := range map[string]string{
+		"100.64.0.9:2222":       "[100.64.0.9]:2222",
+		"[fd00::9]:2222":        "[fd00::9]:2222",
+		"bench-1.example:2222":  "[bench-1.example]:2222",
+		"bench.example:22":      "bench.example",
+		"bench.example.com:443": "[bench.example.com]:443",
+	} {
+		f := newFixture(t)
+		a := attachment("att-1", certA, 30*time.Minute)
+		a.Address = address
+		if _, err := f.m.Attach(context.Background(), a); err != nil {
+			t.Fatalf("%s: %v", address, err)
+		}
+		if kh := read(t, f.knownHosts); !strings.Contains(kh, "\n"+pattern+" "+hostKey+"\n# agentpod-bench ") {
+			t.Errorf("%s pinned as:\n%s", address, kh)
+		}
+		if _, err := f.m.Detach(context.Background(), station, "att-1"); err != nil || read(t, f.knownHosts) != otherHosts {
+			t.Errorf("%s: detach left %q (%v)", address, read(t, f.knownHosts), err)
+		}
+	}
+}

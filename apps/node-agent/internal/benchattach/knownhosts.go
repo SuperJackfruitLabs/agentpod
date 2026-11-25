@@ -3,8 +3,10 @@ package benchattach
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
@@ -27,10 +29,17 @@ func marker(stationID, attemptID string) string { return markerPrefix + stationI
 
 // hostPattern is the known_hosts name ssh looks up for address: bare for port 22, [host]:port
 // otherwise.
+//
+// The host must be an IP address or a strict hostname. It is written into known_hosts, where a
+// comma, a wildcard (`*`, `?`), a negation (`!`), a marker (`@cert-authority`), whitespace or a
+// line break would widen the pin to other hosts or add a line of the caller's choosing.
 func hostPattern(address string) (host string, port int, pattern string, err error) {
 	h, p, err := net.SplitHostPort(address)
 	if err != nil || h == "" {
 		return "", 0, "", fmt.Errorf("address %q is not host:port", address)
+	}
+	if !validHost(h, strings.HasPrefix(address, "[")) {
+		return "", 0, "", fmt.Errorf("address %q does not name an IP address or a hostname", address)
 	}
 	if _, scanErr := fmt.Sscanf(p, "%d", &port); scanErr != nil || port < 1 || port > 65535 || fmt.Sprint(port) != p {
 		return "", 0, "", fmt.Errorf("address %q has no valid port", address)
@@ -39,6 +48,29 @@ func hostPattern(address string) (host string, port int, pattern string, err err
 		return h, port, h, nil
 	}
 	return h, port, "[" + h + "]:" + p, nil
+}
+
+// hostnameLabel is one LDH label: letters, digits and inner hyphens, at most 63 long.
+var hostnameLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+// validHost accepts an IPv4 address, an IPv6 address only in brackets and with no zone, or a
+// hostname of LDH labels no longer than 253 characters.
+func validHost(h string, bracketed bool) bool {
+	if ip, err := netip.ParseAddr(h); err == nil {
+		if ip.Zone() != "" {
+			return false
+		}
+		return ip.Is4() == !bracketed
+	}
+	if bracketed || len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if !hostnameLabel.MatchString(label) {
+			return false
+		}
+	}
+	return true
 }
 
 func pinLine(address, hostKey string) (string, error) {
@@ -58,6 +90,9 @@ func pin(path, stationID, attemptID, line string) error {
 	text := string(unmanage(data, stationID, "", ""))
 	if text != "" && !strings.HasSuffix(text, "\n") {
 		text += "\n"
+	}
+	if strings.ContainsAny(line, "\r\n") || strings.ContainsAny(stationID+attemptID, " \r\n") {
+		return fmt.Errorf("benchattach: refusing a known_hosts pin that is not one line")
 	}
 	text += line + "\n" + marker(stationID, attemptID) + "\n"
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

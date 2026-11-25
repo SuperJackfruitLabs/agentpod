@@ -699,18 +699,18 @@ class FleetSocketTest(unittest.TestCase):
 BENCH_ID = "0123456789abcdef0123456789abcdef"
 
 
-def _v4a_hunk(patch: str):
-    """(search, replacement) of a one-hunk V4A update, joined the way Hermes's parser does
-    (`tools/patch_parser.py` `parse_v4a_patch` / `_split_hunk`)."""
-    lines = patch.split("\n")
-    assert lines[0] == "*** Begin Patch" and lines[-1] == "*** End Patch", patch
-    assert lines[1].startswith("*** Update File: "), patch
-    body = lines[2:-1]
-    for line in body:
-        assert line and line[0] in "+-", line  # an empty line would be skipped by the parser
-    search = "\n".join(l[1:] for l in body if l[0] == "-")
-    replacement = "\n".join(l[1:] for l in body if l[0] == "+")
-    return lines[1][len("*** Update File: "):], search, replacement
+def _hermes_patch_parser():
+    """Hermes's own V4A parser, when this Python has Hermes installed (the contract's venv);
+    None otherwise (CI's unit job, which is stdlib only)."""
+    try:
+        from tools import patch_parser  # type: ignore
+
+        return patch_parser
+    except Exception:
+        return None
+
+
+WD = "/srv/benches/card-7"
 
 
 class BenchStateTest(unittest.TestCase):
@@ -750,34 +750,82 @@ class BenchStateTest(unittest.TestCase):
 
 
 class ReplaceAsV4ATest(unittest.TestCase):
-    def test_rewrites_into_a_hunk_that_searches_and_replaces_exactly(self):
-        cases = [
-            ("a.py", "beta", "BETA"),                       # mid-line fragment
-            ("src/b.py", "def f():\n    return 1\n", "def f():\n    return 2\n"),  # whole lines, trailing newline
-            ("c.txt", "drop me\n", ""),                    # deletion
-            ("d.txt", "x", "x\n\ny"),                      # blank lines added
-            ("e.txt", "*** End Patch", "@@ not a hint @@"),  # marker-looking text
-        ]
-        for path, old, new in cases:
-            d = live.replace_patch_as_v4a({"path": path, "old_string": old, "new_string": new})
+    CASES = [
+        ("a.py", "beta", "BETA"),                                          # mid-line fragment
+        ("src/b.py", "def f():\n    return 1\n", "def f():\n    return 2\n"),  # whole lines, trailing newline
+        ("c.txt", "drop me\n", ""),                                       # deletion
+        ("d.txt", "x", "x\n\ny"),                                         # blank lines added
+        ("e.txt", "*** End Patch", "@@ not a hint @@"),                   # marker-looking text
+        ("f.py", "\treturn 1  ", "\treturn 10  "),                        # whitespace-sensitive
+    ]
+
+    def rewrite(self, path, old, new, **extra):
+        return live.replace_patch_as_v4a({"path": path, "old_string": old, "new_string": new, **extra}, WD)
+
+    def test_rewrites_into_one_update_of_the_resolved_path(self):
+        for path, old, new in self.CASES:
+            d = self.rewrite(path, old, new)
             self.assertEqual(d["action"], "modify")
-            self.assertEqual(d["args"]["mode"], "patch")
             self.assertEqual(set(d["args"]), {"mode", "patch"})
-            self.assertEqual(_v4a_hunk(d["args"]["patch"]), (path, old, new), (path, old, new))
+            self.assertEqual(d["args"]["mode"], "patch")
+            lines = d["args"]["patch"].split("\n")
+            self.assertEqual(lines[:2], ["*** Begin Patch", f"*** Update File: {WD}/{path}"])
+            self.assertEqual(lines[-1], "*** End Patch")
+            self.assertTrue(all(l and l[0] in "+-" for l in lines[2:-1]), lines)
+
+    def test_hermes_parses_the_hunk_back_to_old_and_new_exactly(self):
+        parser = _hermes_patch_parser()
+        if parser is None:
+            self.skipTest("Hermes is not installed in this Python; the contract run covers it")
+        for path, old, new in self.CASES:
+            ops, err = parser.parse_v4a_patch(self.rewrite(path, old, new)["args"]["patch"])
+            self.assertIsNone(err)
+            self.assertEqual([(o.file_path, len(o.hunks)) for o in ops], [(f"{WD}/{path}", 1)])
+            search, replace = parser._split_hunk(ops[0].hunks[0])
+            self.assertEqual(("\n".join(search), "\n".join(replace)), (old, new), (path, old, new))
+
+    def test_hermes_applies_both_modes_to_the_same_result(self):
+        if _hermes_patch_parser() is None:
+            self.skipTest("Hermes is not installed in this Python; the contract run covers it")
+        from tools import patch_parser
+        from tools.fuzzy_match import fuzzy_find_and_replace  # type: ignore
+
+        content = "def f():\n\treturn 1  \n    return 2\nalpha beta gamma\r\nx = 1\nx = 1\n"
+        for old, new in [("beta", "BETA"), ("\treturn 1  ", "\treturn 10  "), ("x = 1", "x = 2"),
+                         ("    return 2\n", "")]:
+            ops, _ = patch_parser.parse_v4a_patch(self.rewrite("g.py", old, new)["args"]["patch"])
+            search, replace = patch_parser._split_hunk(ops[0].hunks[0])
+            v4a = fuzzy_find_and_replace(content, "\n".join(search), "\n".join(replace), replace_all=False)
+            direct = fuzzy_find_and_replace(content, old, new, replace_all=False)
+            self.assertEqual((v4a[0], v4a[1], bool(v4a[3])), (direct[0], direct[1], bool(direct[3])), (old, new))
+
+    def test_only_paths_under_the_working_directory_are_rewritten(self):
+        for path, resolved in [(f"{WD}/a.py", f"{WD}/a.py"), ("sub/../a.py", f"{WD}/a.py"),
+                               ("./sandbox/b.py", f"{WD}/sandbox/b.py"), (f"{WD}/x/../y.py", f"{WD}/y.py")]:
+            d = self.rewrite(path, "x", "y")
+            self.assertEqual(d["action"], "modify", path)
+            self.assertIn(f"*** Update File: {resolved}\n", d["args"]["patch"])
+        for path in ["/etc/passwd", "~/.ssh/authorized_keys", "~", "../outside.py", "sandbox/../../outside.py",
+                     f"{WD}-other/a.py", f"{WD}/../card-8/a.py", "/srv/benches"]:
+            d = self.rewrite(path, "x", "y")
+            self.assertEqual(d["action"], "block", path)
+            self.assertIn(f"exposes only {WD}", d["message"])
+        # Outside is refused before anything else is judged, replace_all included.
+        self.assertIn("exposes only", self.rewrite("/etc/hosts", "x", "y", replace_all=True)["message"])
 
     def test_replace_all_and_unexpressible_edits_are_blocked_toward_v4a(self):
         for args in ({"path": "a", "old_string": "x", "new_string": "y", "replace_all": True},
                      {"path": "a", "old_string": "", "new_string": "y"},
                      {"path": "a", "old_string": "x\r\n", "new_string": "y"},
                      {"path": " a", "old_string": "x", "new_string": "y"}):
-            d = live.replace_patch_as_v4a(args)
+            d = live.replace_patch_as_v4a(args, WD)
             self.assertEqual(d["action"], "block", args)
             self.assertIn('mode="patch"', d["message"])
 
     def test_v4a_write_file_and_malformed_calls_are_left_alone(self):
-        self.assertIsNone(live.replace_patch_as_v4a({"mode": "patch", "patch": "*** Begin Patch\n*** End Patch"}))
-        self.assertIsNone(live.replace_patch_as_v4a({"path": "a"}))
-        self.assertIsNone(live.replace_patch_as_v4a(None))
+        self.assertIsNone(live.replace_patch_as_v4a({"mode": "patch", "patch": "*** Begin Patch\n*** End Patch"}, WD))
+        self.assertIsNone(live.replace_patch_as_v4a({"path": "a"}, WD))
+        self.assertIsNone(live.replace_patch_as_v4a(None, WD))
 
 
 class FakeCtx:
