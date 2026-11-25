@@ -30,7 +30,13 @@ export interface RemoteState {
   workingDirectory: string;
   /** When the agent's certificate expires (RFC 3339). Empty until attached. */
   validBefore: string;
-  /** The agent's node points the station at the bench. */
+  /**
+   * Written before `bench.remote.attach` is sent (write-ahead, as the agent's node journals its own):
+   * from here the agent's node may have pointed the station at the bench, so it is detached before
+   * the station is free, even when the attach's reply never came.
+   */
+  agentAttachSent: boolean;
+  /** The agent's node answered that the station points at the bench. */
   attached: boolean;
   /** The agent's node has restored the station's own terminal. */
   detached: boolean;
@@ -40,12 +46,27 @@ export interface RemoteState {
   resumed: boolean;
   /** In `finish_pending`: the exact finish request bytes, the agent's handoff inside. */
   finishRequest?: string;
+  /**
+   * After a dirty finish, until the agent is prompted again: what it is told. The finish fenced its
+   * sessions and SuperBench retired the certificate, so the agent is attached again and given a
+   * fresh session first.
+   */
+  retryPrompt?: string;
+  /** The summary of the agent's earlier turns, kept across dirty retries and joined with the last one. */
+  summary?: string;
 }
 
 const schema = z.object({ publicKeyFingerprint: z.string().regex(/^SHA256:[A-Za-z0-9+/]{1,128}(?![\s\S])/), attachRequestSHA256: sha,
   user: z.string().max(64), address: z.string().max(300), workingDirectory: z.string().max(4096), validBefore: z.string().max(40),
-  attached: z.boolean(), detached: z.boolean(), dirtyTries: z.number().int().min(0).max(16), resumed: z.boolean(),
-  finishRequest: z.string().min(1).max(65536).optional() }).strict();
+  agentAttachSent: z.boolean(), attached: z.boolean(), detached: z.boolean(), dirtyTries: z.number().int().min(0).max(16), resumed: z.boolean(),
+  finishRequest: z.string().min(1).max(65536).optional(), retryPrompt: z.string().min(1).max(2048).optional(),
+  summary: z.string().max(8192).optional() }).strict();
+
+/**
+ * Whether the agent's node may still point the station at the bench: an attach was sent and no
+ * detach has been confirmed. Such a station is busy whatever the attempt's phase.
+ */
+export const mayBeAttached = (state: RemoteState | undefined): boolean => !!state && (state.agentAttachSent || state.attached) && !state.detached;
 
 /** The retained state, or undefined for a row that holds none yet. A cell that does not parse is refused. */
 export function parseRemoteState(raw: string | null): RemoteState | undefined {

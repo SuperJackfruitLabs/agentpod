@@ -18,7 +18,7 @@ import {
   recordProduced,
   type DispatchKey,
 } from "./ledger";
-import { SUMMARY_LIMIT, type DispatchDeps, type DispatchResult, type TurnEnd } from "./dispatch-types";
+import { STATION_HELD_MESSAGE, SUMMARY_LIMIT, type DispatchDeps, type DispatchResult, type TurnEnd } from "./dispatch-types";
 import { assemblePrompt, claimedSessionInput } from "./dispatch-prompt";
 import { abort, afterTheBoardWasTold, failStarted, handBack, replay, summarise } from "./dispatch-exits";
 import { driveTurn, newTurn, openSegment, ownWorkSummary, post, startHeartbeat, subscribeTurn, type Turn } from "./dispatch-turn";
@@ -72,7 +72,11 @@ async function openClaimed(
     // ─── the session ────────────────────────────────────────────────────────
     // Always asks for the node's MCP proxy: the node decides (a station its operator named, a
     // harness that takes HTTP MCP servers) and says what it injected.
-    const session = await acp.createSession(claimedSessionInput(deps, work, () => client.heartbeat(work)));
+    // Re-checked under the station's open lock: a remote bench stage may have taken the station since
+    // the cycle's own check, and a session opened after its attach would run in its bench.
+    const busy = deps.benchBusy;
+    const session = await acp.createSession({ ...claimedSessionInput(deps, work, () => client.heartbeat(work)),
+      ...(busy ? { admit: async () => { if (await busy()) throw new Error(STATION_HELD_MESSAGE); } } : {}) });
     // Rendered after the session opens, because only the open says which tools it carries (S3-R12).
     const text = renderCardPrompt({ ...prompt, libraryTools: session.libraryTools === true });
     return { text, session };

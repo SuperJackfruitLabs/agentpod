@@ -44,3 +44,4 @@ export {
 export type { HarnessPermissionSubject, PermissionMeaning, PermissionPreviewBlock, PermissionScope } from "./harness-permission";
 export { turnErrorCard } from "./turn-error";
 export { webSocketStream } from "./ws-stream";
+export { withStationOpenLock } from "./timing";

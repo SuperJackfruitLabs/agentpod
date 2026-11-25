@@ -88,7 +88,18 @@ export async function createSession(
       ? await busyRefusal(readiness.holder, userId)
       : new Error(readiness.reason);
 
-  return withStationOpenLock(stationId, () => openSession(input));
+  return admitAndOpen(input, () => openSession(input));
+}
+
+/**
+ * Under the station's open lock, the one every open of this station takes: the bridge's admission
+ * (`admit`), then the open. A refused admission opens nothing. Exported for tests.
+ */
+export function admitAndOpen<T>(input: Pick<CreateSessionInput, "stationId" | "admit">, open: () => Promise<T>): Promise<T> {
+  return withStationOpenLock(input.stationId, async () => {
+    await input.admit?.();
+    return open();
+  });
 }
 
 async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {

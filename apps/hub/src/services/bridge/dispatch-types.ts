@@ -51,6 +51,8 @@ export interface AcpPort {
     mcpProxy?: boolean;
     /** The session's working directory in place of the station's workspace (a remote bench stage). */
     cwd?: string;
+    /** Checked under the station's session-open lock just before the open; a throw refuses it. */
+    admit?: () => Promise<void>;
     executionRun?: SalaamRunAuthority;
     validateExecutionRun?: () => Promise<unknown>;
   }): Promise<{ id: string; libraryTools?: boolean }>;
@@ -59,6 +61,11 @@ export interface AcpPort {
   /** Before a strict re-drive: restore a session a hub restart left un-held; "waiting" while its node is offline. */
   ensureStrictSession?(userId: string, sessionId: string): Promise<"live" | "waiting" | "gone">;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
+  /**
+   * Run `fn` under the station's session-open lock, the one every session open takes: a remote bench
+   * stage attaches the station's terminal under it, so no session opens mid-attach.
+   */
+  withStationLock?<T>(stationId: string, fn: () => Promise<T>): Promise<T>;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
   /**
    * Deliver a decision to the harness parked on `requestSeq`.
@@ -205,6 +212,9 @@ export type DispatchStatus =
   | "unanswered"
   /** The harness or the session failed. */
   | "failed";
+
+/** Why an ordinary session was refused: a remote bench stage holds the station. */
+export const STATION_HELD_MESSAGE = "a remote bench stage holds this station; the card is handed back";
 
 export interface DispatchResult {
   status: DispatchStatus;

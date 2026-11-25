@@ -314,6 +314,7 @@ const hubAcpPort: AcpPort = {
   renewExecution: (userId,sessionId,run) => acpSessions.renewExecution(userId,sessionId,run),
   ensureStrictSession: (userId, sessionId) => acpSessions.ensureSalaamLive(userId, sessionId),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
+  withStationLock: (stationId, fn) => acpSessions.withStationOpenLock(stationId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),
   answerPermission: (userId, sessionId, requestSeq, optionId, answeredBy) =>
     acpSessions.answerPermission(userId, sessionId, requestSeq, optionId, answeredBy),

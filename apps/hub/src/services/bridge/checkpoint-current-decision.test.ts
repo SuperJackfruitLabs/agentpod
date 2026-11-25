@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { checkpointCurrentDecision, failedDecision, finalRowDecision } from "./checkpoint-current-decision";
 
@@ -47,16 +48,17 @@ test("a failed decision stays unavailable when the board says the run is live, c
 
 // A remote stage's attach and finish are decided as execute is (checkpoint-remote-state.ts): an
 // attempt the hub does not hold is never current, and the board is not asked about it.
+const nodeOf = (value: unknown) => z.object({ identity: z.object({ node_id: z.string() }) }).parse(value).identity.node_id;
 test("a remote attach or finish check for an attempt the hub does not hold is never current", async () => {
-  const corpus = JSON.parse(readFileSync(join(import.meta.dir, "../../../../../packages/contract/src/fixtures/bench-coordinator-current-v1.json"), "utf8")) as
-    { requests: Array<{ name: string; value: { identity: { node_id: string } } }> };
+  const corpus = z.object({ requests: z.array(z.object({ name: z.string(), value: z.unknown() })) }).parse(JSON.parse(readFileSync(join(import.meta.dir,
+    "../../../../../packages/contract/src/fixtures/bench-coordinator-current-v1.json"), "utf8")));
   for (const name of ["remote attach", "remote finish"]) {
     const value = corpus.requests.find((c) => c.name === name)?.value;
     if (!value) throw new Error(`fixture ${name} missing`);
-    const decision = await checkpointCurrentDecision(value.identity.node_id, new TextEncoder().encode(JSON.stringify(value)),
+    const decision = await checkpointCurrentDecision(nodeOf(value), new TextEncoder().encode(JSON.stringify(value)),
       async () => { throw new Error("the board is not asked"); });
     expect(decision.decision).toBe("refused");
-    // No row: `stale_owner` with a database, `unavailable` when there is none to read.
-    expect(["stale_owner", "unavailable"]).toContain("code" in decision ? decision.code : "");
+    // No row: `stale_owner` with a database (every CI run has one), `unavailable` when there is none to read.
+    expect("code" in decision ? decision.code : "").toBe(process.env.DATABASE_URL ? "stale_owner" : "unavailable");
   }
 });

@@ -81,6 +81,11 @@ export interface CreateSessionInput {
    * station's terminal reaches over SSH.
    */
   cwd?: string;
+  /**
+   * Trusted bridge field: checked under the station's open lock just before the session opens, and a
+   * throw refuses the open. The bridge re-checks there that no remote bench stage holds the station.
+   */
+  admit?: () => Promise<void>;
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
   executionRun?: SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;
