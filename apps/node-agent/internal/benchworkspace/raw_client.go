@@ -24,7 +24,7 @@ const (
 // complete bounded body. It never retries, follows redirects or parses results.
 func (c *Client) Post(ctx context.Context, path, contentType string, raw []byte, limit int) (int, []byte, error) {
 	switch path {
-	case PathOperations, PathReceipts, PathRegistration:
+	case PathOperations, PathReceipts, PathRegistration, PathRemoteCredentials, PathRemoteStatus:
 	default:
 		return 0, nil, ErrInvalid
 	}

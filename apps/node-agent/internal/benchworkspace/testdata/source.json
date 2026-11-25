@@ -1,6 +1,6 @@
 {
   "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/treaty",
-  "revision": "83e51d583a71f668eec8c2093394613e002c1678",
+  "revision": "d1d4dd0378c767447d318c27f29ce875c069ae7f",
   "status": "PROPOSED; consumer wire checks do not accept protocol or prove source authority",
   "files": {
     "schemas/superbench/operation.v2.json": {
@@ -30,6 +30,18 @@
     "fixtures/superbench-api/reclaim-lifecycle.json": {
       "local": "reclaim-lifecycle.json",
       "sha256": "19fd90285c4e465b95e0e455ff4d4071b022baf5b1ef066858923d7fab064a52"
+    },
+    "schemas/superbench/remote-credential-request.v1.json": {
+      "local": "remote-credential-request.v1.json",
+      "sha256": "57765c33923b3153b994296e705570f6cdf93aefe46a3e38a84cc9fd88f3d7a6"
+    },
+    "schemas/superbench/remote-credential-response.v1.json": {
+      "local": "remote-credential-response.v1.json",
+      "sha256": "47665294881fd539b7b53a2d650c03e7364451de42e1787fcd2d1819eda1f258"
+    },
+    "fixtures/superbench-api/remote-credentials.json": {
+      "local": "remote-credentials.json",
+      "sha256": "de1924527ce5d90759dfe439cfeed19380e3dbd4e6e748ab04f8941c07a83568"
     }
   }
 }
