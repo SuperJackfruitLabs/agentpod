@@ -31,6 +31,7 @@ import type {
   BenchStageSetRequest,
   BenchStageView,
   BenchStageWorker,
+  NodeCapability,
 } from "@agentpod/contract";
 import { NodeCapability } from "@agentpod/contract";
 
@@ -96,7 +97,8 @@ async function stationFacts(tenantId: string, stationId: string): Promise<Statio
 /** Advertised by a bench host's node that can issue remote bench credentials (launch `remote-v1`). */
 const BENCH_REMOTE_CREDENTIAL = NodeCapability.enum["bench.remote.credential"];
 /** Advertised by an agent's node that can point its station's harness at a remote bench. */
-const BENCH_REMOTE_ATTACH = "bench.remote.attach";
+// Typed, so a name the contract's NodeCapability does not know fails to compile.
+const BENCH_REMOTE_ATTACH: NodeCapability = "bench.remote.attach";
 
 interface Placement {
   /** The node that serves the stage's registry profile: the station's own, or a remote stage's bench node. */

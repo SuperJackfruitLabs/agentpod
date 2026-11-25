@@ -78,7 +78,7 @@ export type PostureReport = z.infer<typeof PostureReport>;
 // "bench.remote.credential": the node serves a remote-v1 stage's `attach` and `finish`: it issues SSH certificates
 // for the leases it holds on its bench host, so a remote agent can work in the bench (fleet bench stage --execution remote).
 export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports", "mcp.proxy", "mcp.proxy.manage",
-  "bench.registry.manage", "bench.reclaim", "bench.remote.credential"]);
+  "bench.registry.manage", "bench.reclaim", "bench.remote.credential", "bench.remote.attach"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;
 
 /**

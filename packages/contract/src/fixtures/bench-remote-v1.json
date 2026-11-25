@@ -1,0 +1,40 @@
+{
+  "valid": {
+    "bench.identity.ensure": { "stationId": "st_remote1", "stationKey": "hermes:coder" },
+    "bench.remote.attach": {
+      "stationId": "st_remote1",
+      "stationKey": "hermes:coder",
+      "attemptId": "att-1",
+      "credential": {
+        "certificate": "ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAAA= agentpod bench station st_remote1",
+        "user": "b-0123456789abcdef0123456789abcdef",
+        "address": "100.64.0.9:2222",
+        "host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDdYcsw3074zsdv3Xo/Adf7y1LHHUA458+IwZo2CsvXQ",
+        "host_key_fingerprint": "SHA256:gzHd61IPeg0d396iATXsHgkVvhw18EMxtGSGMp+sGUk",
+        "lease_id": "3d44d4aee991f404e9515268d9e3277a",
+        "generation": 1,
+        "valid_before": "2099-11-25T12:48:34Z",
+        "working_directory": "/srv/superbench-data/benches/card-7"
+      }
+    },
+    "bench.remote.detach": { "stationId": "st_remote1", "attemptId": "att-1" },
+    "bench.remote.status": { "stationId": "st_remote1" }
+  },
+  "invalid": [
+    { "verb": "bench.identity.ensure", "why": "unknown field", "params": { "stationId": "st_remote1", "stationKey": "hermes:coder", "keyPath": "/tmp/k" } },
+    { "verb": "bench.identity.ensure", "why": "missing stationKey", "params": { "stationId": "st_remote1" } },
+    { "verb": "bench.remote.attach", "why": "unknown field", "params": { "stationId": "st_remote1", "stationKey": "hermes:coder", "attemptId": "att-1", "leaseToken": "x", "credential": {} } },
+    { "verb": "bench.remote.attach", "why": "unknown credential field", "params": { "stationId": "st_remote1", "stationKey": "hermes:coder", "attemptId": "att-1", "credential": { "certificate": "c", "user": "b-0123456789abcdef0123456789abcdef", "address": "100.64.0.9:2222", "host_key": "k", "host_key_fingerprint": "f", "lease_id": "l", "generation": 1, "valid_before": "2099-11-25T12:48:34Z", "working_directory": "/w", "lease_token": "secret" } } },
+    { "verb": "bench.remote.attach", "why": "missing credential", "params": { "stationId": "st_remote1", "stationKey": "hermes:coder", "attemptId": "att-1" } },
+    { "verb": "bench.remote.detach", "why": "unknown field", "params": { "stationId": "st_remote1", "attemptId": "att-1", "force": true } },
+    { "verb": "bench.remote.detach", "why": "missing attemptId", "params": { "stationId": "st_remote1" } },
+    { "verb": "bench.remote.status", "why": "unknown field", "params": { "stationId": "st_remote1", "attemptId": "att-1" } }
+  ],
+  "replies": {
+    "bench.identity.ensure": { "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDdYcsw3074zsdv3Xo/Adf7y1LHHUA458+IwZo2CsvXQ agentpod bench station st_remote1" },
+    "bench.remote.attach": { "state": "attached", "validBefore": "2099-11-25T12:48:34Z" },
+    "bench.remote.detach": { "state": "terminal_changed" },
+    "bench.remote.status": { "attemptId": "att-1", "validBefore": "2099-11-25T12:48:34Z" },
+    "refused": { "state": "refused", "code": "terminal_in_use", "message": "the profile's terminal backend is \"docker\", not one this node wrote" }
+  }
+}

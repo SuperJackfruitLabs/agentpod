@@ -62,6 +62,8 @@ def _chunk(delta: dict, finish: str | None = None) -> bytes:
 class ModelHandler(BaseHTTPRequestHandler):
     requests: list = []
     tool: str = ""
+    # None: the streaming turn. A dict: call exactly this tool with these args.
+    forced: dict | None = None
 
     def log_message(self, *_):
         pass
@@ -95,7 +97,10 @@ class ModelHandler(BaseHTTPRequestHandler):
         if not after_tool:
             for word in REASONING.split(" "):
                 self._send(_chunk({"role": "assistant", "reasoning_content": word + " "}))
-            name, args = _pick_tool(body.get("tools") or [])
+            if ModelHandler.forced is not None:
+                name, args = ModelHandler.forced["name"], ModelHandler.forced["args"]
+            else:
+                name, args = _pick_tool(body.get("tools") or [])
             ModelHandler.tool = name
             self._send(_chunk({"tool_calls": [{
                 "index": 0, "id": "call_contract_1", "type": "function",
@@ -287,6 +292,7 @@ def main() -> int:
     failures += _check_what_no_hook_covers()
     print(f"fleet reports: {[r.get('event', {}).get('type') for r in node.reports]}")
     node.close()
+    failures += _check_bench(home, model, AIAgent)
     return _report(failures, home)
 
 
@@ -456,6 +462,110 @@ def _check_what_no_hook_covers() -> list[str]:
             failures.append(f"{adapter} no longer logs {needle!r}: answer pushes lose their turn counts")
     except OSError as exc:
         failures.append(f"could not read Hermes's Matrix adapter: {exc}")
+    return failures
+
+
+# ─── Remote bench ────────────────────────────────────────────────────────────
+
+BENCH_ID = "0123456789abcdef0123456789abcdef"
+BENCH_DIR = "/srv/superbench-data/benches/contract"
+
+
+def _bench_turn(model, AIAgent, session_id: str, tool: dict) -> tuple:
+    """One turn whose model calls *tool*; returns (system prompt, tool result) as Hermes sent them."""
+    ModelHandler.forced = tool
+    first = len(ModelHandler.requests)
+    agent = AIAgent(
+        base_url=f"http://127.0.0.1:{model.server_port}/v1", api_key="contract-key", provider="custom", model=MODEL,
+        quiet_mode=True, skip_context_files=True, skip_memory=True, enabled_toolsets=["file"], platform="cli",
+        session_id=session_id,
+    )
+    try:
+        agent.run_conversation("Edit the file.")
+    finally:
+        ModelHandler.forced = None
+    turn = [r for r in ModelHandler.requests[first:] if r.get("stream")]
+    system = next((m.get("content") for m in (turn[0].get("messages") if turn else []) if m.get("role") == "system"), "")
+    results = [m.get("content") for r in turn for m in r.get("messages") or [] if m.get("role") == "tool"]
+    if isinstance(system, list):
+        system = " ".join(str(part.get("text", "")) for part in system if isinstance(part, dict))
+    return str(system or ""), str(results[-1] if results else "")
+
+
+def _check_bench(home: pathlib.Path, model, AIAgent) -> list[str]:
+    """Attached, a replace-mode patch is rewritten into V4A and lands with the same result, and
+    the model is told where it is working. Detached, neither happens."""
+    failures = []
+
+    def expect(cond, message):
+        if not cond:
+            failures.append(message)
+
+    # On a remote backend replace mode cannot get past edit approval; here, on a local one, it
+    # would quietly work. So the replace path is made to fail, as it does remotely, and which
+    # path ran is recorded: the edit may land only through V4A.
+    from tools import file_operations as fo
+
+    used: list[str] = []
+    real_v4a = fo.ShellFileOperations.patch_v4a
+
+    def replace_refused(self, *_a, **_k):
+        used.append("replace")
+        raise RuntimeError("replace mode reached the backend (as on a remote bench, it cannot land)")
+
+    def v4a_seen(self, *a, **k):
+        used.append("v4a")
+        return real_v4a(self, *a, **k)
+
+    fo.ShellFileOperations.patch_replace, real_replace = replace_refused, fo.ShellFileOperations.patch_replace
+    fo.ShellFileOperations.patch_v4a = v4a_seen
+    try:
+        failures += _bench_scenarios(home, model, AIAgent, used)
+    finally:
+        fo.ShellFileOperations.patch_replace, fo.ShellFileOperations.patch_v4a = real_replace, real_v4a
+    return failures
+
+
+def _bench_scenarios(home: pathlib.Path, model, AIAgent, used: list) -> list[str]:
+    failures = []
+
+    def expect(cond, message):
+        if not cond:
+            failures.append(message)
+
+    state = home / "agentpod-bench.json"
+    state.write_text(json.dumps({"version": 1, "bench_id": BENCH_ID, "working_directory": BENCH_DIR,
+                                 "valid_before": "2099-01-01T00:00:00Z"}))
+    target = home / "bench-edit.py"
+    original = "def f():\n    return 'alpha beta gamma'\n\n\ndef g():\n    return 2\n"
+    target.write_text(original)
+    replace = {"path": str(target), "old_string": "beta", "new_string": "BETA"}
+    system, result = _bench_turn(model, AIAgent, "contract-bench", {"name": "patch", "args": replace})
+    expect(target.read_text() == original.replace("beta", "BETA"),
+           f"attached: replace-mode patch did not land as V4A with the same result: {target.read_text()!r} ({result[:300]})")
+    expect(BENCH_ID in system and BENCH_DIR in system, "attached: the bench note is not in the session's system prompt")
+    expect(used == ["v4a"], f"attached: the edit went through {used}, not V4A alone")
+
+    # Multi-line, whole-line edit, as a model often sends it.
+    replace = {"path": str(target), "old_string": "def g():\n    return 2\n", "new_string": "def g():\n    return 3\n"}
+    _, result = _bench_turn(model, AIAgent, "contract-bench-2", {"name": "patch", "args": replace})
+    expect(target.read_text().endswith("def g():\n    return 3\n"), f"attached: multi-line replace did not land: {result[:300]}")
+    expect(used == ["v4a", "v4a"], f"attached: the multi-line edit went through {used}")
+
+    replace_all = {"path": str(target), "old_string": "return", "new_string": "yield", "replace_all": True}
+    before = target.read_text()
+    _, result = _bench_turn(model, AIAgent, "contract-bench-3", {"name": "patch", "args": replace_all})
+    expect(target.read_text() == before and ("mode=\\\"patch\\\"" in result or 'mode="patch"' in result),
+           f"attached: replace_all was not blocked with a V4A hint: {result[:300]}")
+
+    expect(used == ["v4a", "v4a"], f"attached: a blocked replace_all still reached the backend: {used}")
+
+    state.unlink()
+    replace = {"path": str(target), "old_string": "BETA", "new_string": "beta"}
+    _bench_turn(model, AIAgent, "contract-detached-edit", {"name": "patch", "args": replace})
+    expect(used[-1:] == ["replace"], f"detached: the hook still rewrote a replace-mode patch: {used}")
+    system, _ = _bench_turn(model, AIAgent, "contract-detached", {"name": "read_file", "args": {"path": str(target)}})
+    expect(BENCH_ID not in system, "detached: the bench note is still in the system prompt")
     return failures
 
 

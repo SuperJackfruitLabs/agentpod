@@ -23,6 +23,21 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   (`REMOTE_HARNESS_UNSUPPORTED`). Only the configuration is stored here; the
   remote attempt itself comes in a later change. Migration 0139 adds
   `bench_stages.execution` and `bench_node_id`.
+- Node verbs `bench.identity.ensure` and `bench.remote.attach|detach|status`,
+  advertised as `bench.remote.attach`: a Hermes station gets its own bench SSH
+  key (private half on the node only), and attach writes the bench certificate
+  beside it, pins the bench host key in the gateway user's `known_hosts` and
+  points the profile's `terminal:` section at the bench, `cwd` included.
+  Detach restores `config.yaml` and `known_hosts` byte for byte, or leaves a
+  terminal section someone else has since changed (`terminal_changed`). Attach
+  refuses a profile that would copy credential files to the bench, and an
+  expiry sweep detaches five minutes after a certificate lapses. Neither verb
+  restarts the gateway.
+- `agentpod-live` 0.3.0: while its profile is attached to a remote bench, the
+  plugin rewrites replace-mode `patch` calls into the equivalent V4A patch (the
+  only form ACP edit approval can preview remotely), blocks `replace_all` with
+  a hint toward V4A, and tells each new session which bench and directory it
+  works in.
 
 ## v0.1.133 — 2026-11-24
 

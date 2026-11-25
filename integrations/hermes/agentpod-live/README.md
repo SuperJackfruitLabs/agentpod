@@ -57,7 +57,16 @@ A copy installed by hand is handled in one of two ways:
 - If it is byte-identical to this plugin, `enable` adopts it.
 - If it differs, `enable` refuses until you pass `--replace-unmanaged`, which sets it aside; `disable` restores it.
 
-The plugin needs `MATRIX_HOMESERVER` and `MATRIX_ACCESS_TOKEN`, which the Matrix platform already requires. When either is missing, it registers no hooks. That matters because a registered stream hook makes Hermes stream every model call.
+The streaming and fleet hooks need `MATRIX_HOMESERVER` and `MATRIX_ACCESS_TOKEN`, which the Matrix platform already requires. When either is missing, they are not registered. That matters because a registered stream hook makes Hermes stream every model call. The remote-bench hooks below are registered either way.
+
+## Remote bench
+
+While the node has attached the profile to a remote bench (`bench.remote.attach`), Hermes's terminal backend is SSH into the bench and every file tool lands there. The node writes `<profile>/agentpod-bench.json` (0600; the bench id, working directory and expiry, no secret) and removes it on detach. The plugin treats a missing, malformed or expired file as detached, and then does nothing.
+
+- **Replace-mode `patch` becomes V4A.** ACP edit approval previews a replace-mode edit by reading the target from the gateway host's own disk (`acp_adapter/edit_approval.py`), so on a remote backend it denies every one. A `pre_tool_call` hook, which runs before edit approval, rewrites the call into the one-hunk V4A update (`mode="patch"`) that searches for exactly `old_string` and replaces it with exactly `new_string`. Both modes apply through the same fuzzy matcher, uniqueness rule included. `replace_all`, an empty `old_string`, a carriage return or a path with surrounding whitespace has no V4A form; those calls are blocked with a message that tells the model to send V4A instead. V4A and `write_file` calls pass untouched. Hermes offers no per-profile switch to turn replace mode off.
+- **The model is told where it is.** A plugin prompt section (`agentpod-remote-bench`) names the bench and its working directory for each new session. Hermes freezes sections per session, so an open session keeps what it started with; the hub opens a new session after attach and detach.
+
+The node, not the plugin, refuses an attach that would copy credential files to the bench (`terminal.credential_files`, or a skill declaring `required_credential_files`): Hermes has no hook for its file sync.
 
 ## Supported Hermes versions
 
@@ -76,6 +85,7 @@ The contract test runs one real `AIAgent` turn with the plugin loaded by Hermes'
 - A local fake model streams reasoning, a tool call and an answer.
 - A local fake homeserver records every `sendToDevice`.
 - The test then checks the events against the hub's contract.
+- With a remote-bench state file in place, a replace-mode `patch` must land through V4A alone (the replace path is made to fail, as it does remotely) and the bench note must be in the session's system prompt; with the file removed, neither may happen.
 
 It needs a Python with Hermes installed (`uv pip install -e 'hermes-agent[acp]'`).
 

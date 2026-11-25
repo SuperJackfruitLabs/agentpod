@@ -267,13 +267,14 @@ class RegisterTest(unittest.TestCase):
         def register_hook(self, name, fn):
             self.hooks[name] = fn
 
-    def test_no_credentials_means_no_hooks(self):
+    def test_no_credentials_means_no_stream_hooks(self):
         # A stream hook forces Hermes to stream every call; without somewhere
-        # to send, registering one would be all cost.
+        # to send, registering one would be all cost. Only the remote-bench
+        # tool hook stays, a no-op until the node attaches the profile.
         ctx = self.Ctx()
         with mock.patch.dict(live.os.environ, {}, clear=True):
             live.register(ctx)
-        self.assertEqual(ctx.hooks, {})
+        self.assertEqual(set(ctx.hooks), {"pre_tool_call"})
 
     def test_hooks_route_a_matrix_turn_end_to_end(self):
         sent = []
@@ -691,6 +692,142 @@ class FleetSocketTest(unittest.TestCase):
             self.assertEqual(live.fleet_socket_path(), "/root/.agentpod/fleet.sock")
         with mock.patch.dict(live.os.environ, {"AGENTPOD_FLEET_SOCKET": "/run/f.sock"}, clear=True):
             self.assertEqual(live.fleet_socket_path(), "/run/f.sock")
+
+
+# ─── Remote bench ────────────────────────────────────────────────────────────
+
+BENCH_ID = "0123456789abcdef0123456789abcdef"
+
+
+def _v4a_hunk(patch: str):
+    """(search, replacement) of a one-hunk V4A update, joined the way Hermes's parser does
+    (`tools/patch_parser.py` `parse_v4a_patch` / `_split_hunk`)."""
+    lines = patch.split("\n")
+    assert lines[0] == "*** Begin Patch" and lines[-1] == "*** End Patch", patch
+    assert lines[1].startswith("*** Update File: "), patch
+    body = lines[2:-1]
+    for line in body:
+        assert line and line[0] in "+-", line  # an empty line would be skipped by the parser
+    search = "\n".join(l[1:] for l in body if l[0] == "-")
+    replacement = "\n".join(l[1:] for l in body if l[0] == "+")
+    return lines[1][len("*** Update File: "):], search, replacement
+
+
+class BenchStateTest(unittest.TestCase):
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, True)
+
+    def write(self, **fields):
+        state = {"version": 1, "bench_id": BENCH_ID, "working_directory": "/srv/benches/card-7",
+                 "valid_before": "2099-01-01T00:00:00Z"}
+        state.update(fields)
+        with open(os.path.join(self.home, live.BENCH_STATE_FILE), "w") as f:
+            json.dump(state, f)
+
+    def test_absent_malformed_and_expired_are_not_attached(self):
+        self.assertIsNone(live.read_bench_state(self.home))
+        with open(os.path.join(self.home, live.BENCH_STATE_FILE), "w") as f:
+            f.write("{not json")
+        self.assertIsNone(live.read_bench_state(self.home))
+        for bad in ({"version": 2}, {"bench_id": "../x"}, {"working_directory": "relative"},
+                    {"valid_before": "tomorrow"}, {"valid_before": "2000-01-01T00:00:00Z"}):
+            self.write(**bad)
+            self.assertIsNone(live.read_bench_state(self.home), bad)
+
+    def test_live_state_and_its_expiry(self):
+        self.write(valid_before="2030-01-01T00:00:00.5Z")
+        state = live.read_bench_state(self.home, now=0)
+        self.assertEqual(state["bench_id"], BENCH_ID)
+        self.assertIsNone(live.read_bench_state(self.home, now=1893456000))  # 2030-01-01T00:00:00Z
+
+    def test_prompt_names_bench_and_directory_only_when_attached(self):
+        self.assertEqual(live.bench_prompt(None), "")
+        self.write()
+        text = live.bench_prompt(live.read_bench_state(self.home))
+        self.assertIn(BENCH_ID, text)
+        self.assertIn("/srv/benches/card-7", text)
+
+
+class ReplaceAsV4ATest(unittest.TestCase):
+    def test_rewrites_into_a_hunk_that_searches_and_replaces_exactly(self):
+        cases = [
+            ("a.py", "beta", "BETA"),                       # mid-line fragment
+            ("src/b.py", "def f():\n    return 1\n", "def f():\n    return 2\n"),  # whole lines, trailing newline
+            ("c.txt", "drop me\n", ""),                    # deletion
+            ("d.txt", "x", "x\n\ny"),                      # blank lines added
+            ("e.txt", "*** End Patch", "@@ not a hint @@"),  # marker-looking text
+        ]
+        for path, old, new in cases:
+            d = live.replace_patch_as_v4a({"path": path, "old_string": old, "new_string": new})
+            self.assertEqual(d["action"], "modify")
+            self.assertEqual(d["args"]["mode"], "patch")
+            self.assertEqual(set(d["args"]), {"mode", "patch"})
+            self.assertEqual(_v4a_hunk(d["args"]["patch"]), (path, old, new), (path, old, new))
+
+    def test_replace_all_and_unexpressible_edits_are_blocked_toward_v4a(self):
+        for args in ({"path": "a", "old_string": "x", "new_string": "y", "replace_all": True},
+                     {"path": "a", "old_string": "", "new_string": "y"},
+                     {"path": "a", "old_string": "x\r\n", "new_string": "y"},
+                     {"path": " a", "old_string": "x", "new_string": "y"}):
+            d = live.replace_patch_as_v4a(args)
+            self.assertEqual(d["action"], "block", args)
+            self.assertIn('mode="patch"', d["message"])
+
+    def test_v4a_write_file_and_malformed_calls_are_left_alone(self):
+        self.assertIsNone(live.replace_patch_as_v4a({"mode": "patch", "patch": "*** Begin Patch\n*** End Patch"}))
+        self.assertIsNone(live.replace_patch_as_v4a({"path": "a"}))
+        self.assertIsNone(live.replace_patch_as_v4a(None))
+
+
+class FakeCtx:
+    def __init__(self, sections=True):
+        self.hooks = {}
+        self.sections = {}
+        if not sections:
+            self.register_system_prompt_section = None
+            del self.register_system_prompt_section
+
+    def register_hook(self, name, fn):
+        self.hooks.setdefault(name, []).append(fn)
+
+    def register_system_prompt_section(self, id, content, **_):
+        self.sections[id] = content
+
+
+class RegisterBenchTest(unittest.TestCase):
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.ctx = FakeCtx()
+        live.register_bench(self.ctx, home=lambda: self.home)
+        self.hook = self.ctx.hooks["pre_tool_call"][0]
+        self.section = self.ctx.sections[live.BENCH_PROMPT_SECTION]
+
+    def attach(self):
+        with open(os.path.join(self.home, live.BENCH_STATE_FILE), "w") as f:
+            json.dump({"version": 1, "bench_id": BENCH_ID, "working_directory": "/srv/b",
+                       "valid_before": "2099-01-01T00:00:00Z"}, f)
+
+    def test_detached_is_a_no_op(self):
+        replace = {"path": "a", "old_string": "x", "new_string": "y"}
+        self.assertIsNone(self.hook(tool_name="patch", args=replace))
+        self.assertEqual(self.section({}), "")
+
+    def test_attached_rewrites_patch_and_adds_the_note(self):
+        self.attach()
+        replace = {"path": "a", "old_string": "x", "new_string": "y"}
+        self.assertEqual(self.hook(tool_name="patch", args=replace)["action"], "modify")
+        self.assertIsNone(self.hook(tool_name="write_file", args={"path": "a", "content": "x"}))
+        self.assertIn(BENCH_ID, self.section({}))
+        os.remove(os.path.join(self.home, live.BENCH_STATE_FILE))
+        self.assertIsNone(self.hook(tool_name="patch", args=replace))
+
+    def test_registers_without_matrix_and_without_prompt_sections(self):
+        ctx = FakeCtx(sections=False)
+        with mock.patch.dict(live.os.environ, {}, clear=True):
+            live.register(ctx)
+        self.assertEqual(list(ctx.hooks), ["pre_tool_call"])
 
 
 if __name__ == "__main__":
