@@ -278,6 +278,20 @@ async function tellNode(attempt: RetainedCheckpointAttempt, deps: CheckpointDriv
 }
 
 /**
+ * A remote attempt's failure is often the agent's node's or the hub's, never heard by the bench host's
+ * node, whose record still holds the lease and its certificate. Once the failure is closed the run is
+ * over, so one `status` has that node ask the hub's decision (stale_owner) and release. Best effort:
+ * a lost tell leaves the lease to the card's next attempt or its clearing, as before.
+ */
+async function releaseRemoteBench(attempt: RetainedCheckpointAttempt, deps: CheckpointDriveDeps): Promise<void> {
+  if (!isRemoteProfile(attempt.profile)) return;
+  const node = await tellNode(attempt, deps);
+  const terminal = node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code);
+  if (!terminal) log.warn("remote checkpoint attempt failed; the bench host's node did not confirm its lease released",
+    { tenantId: attempt.row.tenantId, attemptId: attempt.row.attemptId, reply: node.reply?.state ?? node.error });
+}
+
+/**
  * End an attempt whose run the board definitively ended (checkpoint-run-ended.ts), instead of parking
  * it forever. Never reports a pass, and never tells the board anything: a run verb on a run whose card
  * moved on would act on the card where it is now.
@@ -302,8 +316,9 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
   try {
     if (phase === "failure_pending") {
       const closed = (await deps.close(attempt, "run_ended", ended)).attempt;
+      await releaseRemoteBench(closed, deps);
       const failure = heldFailure(closed);
-      log.info("checkpoint run ended on the board; the held failure is closed and nothing was sent", meta);
+      log.info("checkpoint run ended on the board; the held failure is closed and nothing was sent to the board", meta);
       return { status: failure.disposition, ...ids, reason: failure.reason };
     }
     if (!RUN_ENDABLE_PHASES.has(phase) && phase !== "submission_pending") throw new CheckpointRefused("source", "retained.phase");
@@ -528,6 +543,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             outcome = "lease_ended";
           }
           attempt = (await deps.close(attempt, outcome)).attempt;
+          await releaseRemoteBench(attempt, deps);
           // A capacity refusal holds the station's checkpoint claims for a while; anything else forgets the card.
           if (failure.code === "capacity_exhausted") deps.capacity?.refused(capacityCard(attempt.claim), failure.disposition === "failed");
           else deps.capacity?.clear(capacityCard(attempt.claim));

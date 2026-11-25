@@ -434,6 +434,39 @@ test("a refusal from the agent's node fails the attach with its code; one about 
   expect(latestOf(again).row.phase).toBe("attach_pending");
 });
 
+test("a failed remote attempt tells the bench host's node once the board has the failure, so its lease is released", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  const request = h.deps.request;
+  const failedBeforeStatus: boolean[] = [];
+  h.deps.request = async (node, verb, params, opts) => {
+    if (verb === "bench.remote.attach")
+      return { ok: true, data: { state: "refused", code: "credential_files", message: "the profile mounts credential files" } };
+    if (verb === BENCH_COORDINATOR_VERB && BenchCoordinatorRequest.safeParse(params).data?.operation === "status") failedBeforeStatus.push(h.runVerbs().some((c) => c.path.endsWith("/fail")));
+    return request(node, verb, params, opts);
+  };
+  expect((await h.drive()).status).toBe("failed");
+  // The agent's node refused, so the bench node's record still holds the lease: only a status, after the
+  // board's fail, has it ask the hub's decision (now stale_owner) and release.
+  const status = h.sent(BENCH_COORDINATOR_VERB, "status");
+  expect(status).toHaveLength(1);
+  expect(status[0]?.node).toBe(attempt.profile.target.node_id);
+  expect(failedBeforeStatus).toEqual([true]);
+  expect(latestOf(h).row.phase).toBe("failed");
+
+  // A run the board ended before the failure was told takes no run verb, and the bench node is still told.
+  const ended = harness((await remoteAttempt()).attempt);
+  const base = ended.deps.request;
+  ended.deps.request = async (node, verb, params, opts) => verb === "bench.remote.attach"
+    ? { ok: true, data: { state: "refused", code: "credential_files", message: "the profile mounts credential files" } }
+    : base(node, verb, params, opts);
+  ended.state.runView = endedView(attempt);
+  await ended.drive();
+  expect(ended.runVerbs()).toEqual([]);
+  expect(ended.sent(BENCH_COORDINATOR_VERB, "status")).toHaveLength(1);
+  expect(latestOf(ended).row.phase).toBe("failed");
+});
+
 test("the hub's decision accepts attach and finish only for the bytes it retained, in their phases", async () => {
   const { attempt } = await remoteAttempt();
   const h = harness(attempt);
