@@ -10,13 +10,16 @@
  * board) and why nothing is left running. Settling never deletes the row or any evidence in it;
  * it ends the attempt as `retired` with the operator's statement beside what was already recorded,
  * and the Hub then answers the node `stale_owner` for it, so the node retires its own record too.
+ * A remote bench stage's agent stops at once, as on every other exit: its turn is cancelled, the
+ * station's sessions are ended and the station detached (a detach that fails is the sweep's).
  */
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { resolveTenantId } from "../auth/tenant";
 import { logAdminAction } from "../models/admin-audit-log";
-import { canonicalCheckpoint, CHECKPOINT_TERMINAL_PHASES, checkpointProfileSuperseded, NO_PRODUCER_EFFECT_PHASES,
+import { request as nodeRequest } from "../services/broker";
+import { canonicalCheckpoint, CHECKPOINT_TERMINAL_PHASES, checkpointProfileSuperseded, endRemoteWork, NO_PRODUCER_EFFECT_PHASES,
   readCheckpointAttempt, retireCheckpointAttempt, unresolvedCheckpointAttempts } from "../services/bridge";
 
 const settleSchema = z.object({
@@ -54,6 +57,8 @@ export const adminCheckpointAttemptsRouter = new Hono()
     const userId = c.get("user").id;
     const settled = await retireCheckpointAttempt(attempt, { reason: "operator", by: userId, evidence });
     if (!settled) return c.json({ error: "the attempt moved on while it was being settled; read it again" }, 409);
+    const retired = await readCheckpointAttempt(tenantId, attemptId).catch(() => undefined);
+    if (retired) await endRemoteWork(retired, { request: nodeRequest }, "An operator settled the bench stage's attempt.");
     await logAdminAction({ tenantId, adminUserId: userId, action: "checkpoint_attempt_settle",
       targetResourceId: attemptId, targetResourceType: "checkpoint_attempt",
       details: { from: attempt.row.phase, boardId: attempt.row.boardId, runId: attempt.row.runId,

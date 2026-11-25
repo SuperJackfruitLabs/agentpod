@@ -68,6 +68,12 @@ export interface AcpPort {
   withStationLock?<T>(stationId: string, fn: () => Promise<T>): Promise<T>;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
   /**
+   * End every session on a station and confirm with its node that no agent process of theirs still
+   * runs (a remote bench stage before it opens a fresh session after a hub restart). False when that
+   * cannot be confirmed. Without it, such a stage opens nothing.
+   */
+  closeStationSessions?(input: { tenantId: string; stationId: string }, reason: string): Promise<boolean>;
+  /**
    * Deliver a decision to the harness parked on `requestSeq`.
    *
    * `optionId` is ACP's own identifier for the option, and it is delivered

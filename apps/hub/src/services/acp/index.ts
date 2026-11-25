@@ -8,6 +8,7 @@ export {
   answerPermission,
   cancelPermission,
   cancelTurn,
+  closeStationSessions,
   createSession,
   endSession,
   endSessionAsWorkspaceAdmin,

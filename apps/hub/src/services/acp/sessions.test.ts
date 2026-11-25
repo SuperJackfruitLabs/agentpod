@@ -89,6 +89,7 @@ import {
   reconcileOnBoot,
   stationReadiness,
   closeOrphanedProcesses,
+  closeStationSessions,
   clampSessionLimit,
   deriveSessionTitle,
   _setOfflineGraceMsForTest,
@@ -3803,3 +3804,77 @@ test("concurrent end waits for the same settled teardown before replacement", as
     fake.close();server.stop(true);
   }
 },20_000);
+
+// ─── Confirmed closes: a station's sessions, and the boot and reconnect markers ────────────────
+
+test(
+  "closeStationSessions ends every session on the station and is true only once the node confirms each process closed",
+  async () => {
+    const opts: FakeAcpNodeOpts = { stationKey: "acp-close-station" };
+    const { server, fake, station } = await setupRig("acpsess-close-host", opts);
+    try {
+      const live = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", tenantId: BOOTSTRAP_TENANT_ID });
+      const liveProc = (await nodeSessionIdOf(live.id)) ?? "missing";
+      // An orphan a restart left: ended, still naming its process.
+      const orphanId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({ tenantId: BOOTSTRAP_TENANT_ID, id: orphanId, stationId: station.id, userId: TEST_USER,
+        mode: "ask", status: "ended", endedReason: "hub restarted", nodeSessionId: "acp-proc-orphan-close-1",
+        createdAt: new Date(), lastEventAt: new Date() });
+      // The node refuses the close: not confirmed, and the orphan keeps its marker.
+      opts.closeFails = true;
+      expect(await closeStationSessions(BOOTSTRAP_TENANT_ID, station.id, "test")).toBe(false);
+      expect((await getSession(TEST_USER, live.id))?.status).toBe("ended");
+      expect(await nodeSessionIdOf(orphanId)).toBe("acp-proc-orphan-close-1");
+      // It confirms: true, each process closed by its own id, every marker cleared.
+      opts.closeFails = false;
+      expect(await closeStationSessions(BOOTSTRAP_TENANT_ID, station.id, "test")).toBe(true);
+      expect(closesSeenBy(fake)).toEqual(expect.arrayContaining([liveProc, "acp-proc-orphan-close-1"]));
+      expect(await nodeSessionIdOf(orphanId)).toBeNull();
+      expect(await nodeSessionIdOf(live.id)).toBeNull();
+      // Nothing left to close: true without asking the node again.
+      const asked = closesSeenBy(fake).length;
+      expect(await closeStationSessions(BOOTSTRAP_TENANT_ID, station.id, "test")).toBe(true);
+      expect(closesSeenBy(fake)).toHaveLength(asked);
+      // A node that is offline is no confirmation.
+      await db.update(acpSessions).set({ nodeSessionId: "acp-proc-orphan-close-2" }).where(eq(acpSessions.id, orphanId));
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(await closeStationSessions(BOOTSTRAP_TENANT_ID, station.id, "test")).toBe(false);
+      expect(await nodeSessionIdOf(orphanId)).toBe("acp-proc-orphan-close-2");
+      // A station that is not this workspace's is no confirmation either.
+      expect(await closeStationSessions("tenant-other", station.id, "test")).toBe(false);
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "a boot or reconnect close the node does not confirm keeps the orphan marker for the next try",
+  async () => {
+    const opts: FakeAcpNodeOpts = { stationKey: "acp-unconfirmed-station", closeFails: true };
+    const { server, fake, station, nodeId } = await setupRig("acpsess-unconfirmed-host", opts);
+    try {
+      const staleId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({ tenantId: BOOTSTRAP_TENANT_ID, id: staleId, stationId: station.id, userId: TEST_USER,
+        mode: "ask", status: "working", endedReason: null, nodeSessionId: "acp-proc-unconfirmed-1",
+        createdAt: new Date(), lastEventAt: new Date() });
+      await reconcileOnBoot();
+      await pollUntil(() => closesSeenBy(fake).includes("acp-proc-unconfirmed-1"));
+      await new Promise((r) => setTimeout(r, 100));
+      expect(await nodeSessionIdOf(staleId)).toBe("acp-proc-unconfirmed-1");
+      await closeOrphanedProcesses(nodeId);
+      expect(await nodeSessionIdOf(staleId)).toBe("acp-proc-unconfirmed-1");
+      // Confirmed on the next reconnect: cleared.
+      opts.closeFails = false;
+      await closeOrphanedProcesses(nodeId);
+      expect(await nodeSessionIdOf(staleId)).toBeNull();
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);

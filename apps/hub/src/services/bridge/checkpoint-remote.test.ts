@@ -103,6 +103,8 @@ function harness(initial: RetainedCheckpointAttempt) {
     statusReply: { state: "refused", code: "stale_owner" } as Record<string, unknown>,
     /** What the board's run view says (GET runs/:id); undefined is the run still working. */
     runView: undefined as unknown, stationReady: true, endedSessions: [] as string[],
+    /** Whether the station's node confirms its sessions' processes closed, and how often it was asked. */
+    closeConfirmed: true, stationCloses: 0,
     retired: [] as Array<{ reason: string; by: string; evidence: string; phase: string }>,
     client: new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
       fetch: contractFetch(async (url, init) => {
@@ -122,7 +124,8 @@ function harness(initial: RetainedCheckpointAttempt) {
     turn: { acp: { ...idleAcp, withStationLock: async (stationId, fn) => { h.locks.push(`enter:${stationId}`);
       try { return await fn(); } finally { h.locks.push(`leave:${stationId}`); } },
     stationReady: async () => ({ ready: h.stationReady, ...(h.stationReady ? {} : { reason: "Node is offline." }) }),
-    endSession: async (_user, session) => { h.endedSessions.push(session); } },
+    endSession: async (_user, session) => { h.endedSessions.push(session); },
+    closeStationSessions: async () => { h.stationCloses++; return h.closeConfirmed; } },
     agent: { key: "fixture", boardId: "brd_ABC123", token: "spa_x", stationId: initial.profile.target.station_id,
       hubUserId: "usr_x", mode: "full-auto" }, tenantId: initial.row.tenantId },
     start: async (_deps, _attempt, cwd, opening = "") => {
@@ -251,7 +254,7 @@ test("attach sends only the public key and stores no certificate or token", asyn
     address: String(CREDENTIAL.address), workingDirectory: String(CREDENTIAL.working_directory), validBefore: iso(T0 + 30 * 60_000),
     agentAttachSent: true, attached: true, detached: false, dirtyTries: 0, resumed: false,
     // When the stage's bound started, and the session the agent works in: neither is a credential.
-    turnStartedAt: new Date(T0).toISOString(), sessionId: "acps_1" });
+    turnStartedAt: new Date(T0).toISOString() });
 });
 
 test("renewal happens when ten minutes remain and pushes the new certificate to the agent's node", async () => {
@@ -737,7 +740,7 @@ test("a hub restart in working resumes the turn once, then stops heartbeating", 
   const { attempt } = await remoteAttempt();
   const h = harness(attempt);
   await h.drive();
-  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: false, sessionId: "acps_1" });
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: false });
   // The restart: this process holds no turn. A permission wait is lost the same way (it is not in the dispatch ledger).
   resetRemoteTurnsForTests();
   h.state.now = T0 + 10 * 60_000;
@@ -745,9 +748,9 @@ test("a hub restart in working resumes the turn once, then stops heartbeating", 
   expect(REMOTE_RESUME_PROMPT).toBe("Your previous turn was interrupted; the workspace still holds your work. Continue.");
   expect(h.state.starts).toHaveLength(2);
   expect(h.state.starts[1]).toEqual({ cwd: String(CREDENTIAL.working_directory), opening: `${REMOTE_TURN_PREFACE}\n\n${REMOTE_RESUME_PROMPT}` });
-  // The interrupted session is ended first, so two agents never work in one bench.
-  expect(h.state.endedSessions).toEqual(["acps_1"]);
-  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: true, sessionId: "acps_2" });
+  // The station's sessions were confirmed closed first, so two agents never work in one bench.
+  expect(h.state.stationCloses).toBe(1);
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: true });
   // The resumed turn is heartbeated as any.
   const beats = h.heartbeats();
   h.state.now += REMOTE_HEARTBEAT_MS;
@@ -820,8 +823,8 @@ test("a hub restart resumes only while the station is online and the stage's tim
   expect((await ended.drive()).status).toBe("released");
   expect(ended.state.starts).toHaveLength(1);
   expect(ended.state.retired).toMatchObject([{ reason: "run_ended" }]);
-  // No turn in this process: the session the agent last worked in is ended by its retained id.
-  expect(ended.state.endedSessions).toEqual(["acps_1"]);
+  // No turn in this process: the station's sessions are ended.
+  expect(ended.state.stationCloses).toBeGreaterThanOrEqual(1);
 });
 
 test("a run blocked through board tools ends without a checkpoint and detaches", async () => {
@@ -956,6 +959,121 @@ test("a re-attach that keeps failing waits before it is tried again", async () =
   expect(await h.drive()).toMatchObject({ recheckMs: 5_000 });
   expect(h.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(attaches + 1);
   expect(h.state.starts).toHaveLength(2);
-  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ sessionId: "acps_2" });
   expect(parseRemoteState(latestOf(h).row.remote)?.retryPrompt).toBeUndefined();
+});
+
+test("a hub restart opens no session until the station's sessions are confirmed closed", async () => {
+  // The interrupted agent process may still run on its node: a close nobody confirmed opens nothing.
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  resetRemoteTurnsForTests();
+  h.state.closeConfirmed = false;
+  h.state.now = T0 + 60_000;
+  for (let pass = 0; pass < 2; pass++) expect((await h.drive()).recheckMs).toBeUndefined();
+  expect(h.state.starts).toHaveLength(1);
+  expect(parseRemoteState(latestOf(h).row.remote)).toMatchObject({ resumed: false });
+  expect(h.heartbeats()).toBe(1);
+  // A port that cannot confirm closes at all opens nothing either.
+  const acp = h.deps.remote?.turn.acp;
+  if (!acp) throw new Error("no acp seam");
+  const { closeStationSessions: confirm, ...without } = acp;
+  if (h.deps.remote) h.deps.remote.turn.acp = without;
+  h.state.closeConfirmed = true;
+  await h.drive();
+  expect(h.state.starts).toHaveLength(1);
+  // Confirmed: resumed then.
+  if (h.deps.remote && confirm) h.deps.remote.turn.acp = { ...without, closeStationSessions: confirm };
+  await h.drive();
+  expect(h.state.starts).toHaveLength(2);
+
+  // The same for a dirty tree's re-attach after a restart.
+  resetRemoteTurnsForTests();
+  const dirty = harness((await remoteAttempt()).attempt);
+  dirty.state.finishReplies.push(reply("finish-refused-dirty"));
+  await dirty.drive();
+  dirty.state.agentAttach = () => ({ ok: false, error: "request timed out" });
+  await dirty.turn().end();
+  await dirty.drive();
+  resetRemoteTurnsForTests();
+  dirty.state.agentAttach = undefined;
+  dirty.state.closeConfirmed = false;
+  dirty.state.now = T0 + 60_000;
+  const attaches = dirty.sent(BENCH_COORDINATOR_VERB, "attach").length;
+  expect((await dirty.drive()).recheckMs).toBeUndefined();
+  expect(dirty.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(attaches);
+  expect(dirty.state.starts).toHaveLength(1);
+  dirty.state.closeConfirmed = true;
+  dirty.state.now += REMOTE_REATTACH_RETRY_MS;
+  await dirty.drive();
+  expect(dirty.state.starts).toHaveLength(2);
+});
+
+test("a hub restart attaches the station again before it resumes, when its node no longer holds the attachment or the certificate is ending", async () => {
+  // The agent's node detached the station meanwhile (its certificate lapsed during the downtime).
+  const { attempt } = await remoteAttempt();
+  const gone = harness(attempt);
+  await gone.drive();
+  resetRemoteTurnsForTests();
+  gone.state.status = {};
+  gone.state.now = T0 + 10 * 60_000;
+  gone.state.certificateValidBefore = iso(T0 + 40 * 60_000);
+  const startsAtAttach: number[] = [];
+  gone.state.agentAttach = (params) => {
+    startsAtAttach.push(gone.state.starts.length);
+    return { ok: true, data: { state: "attached", validBefore: validBeforeOf(params.credential) } };
+  };
+  expect(await gone.drive()).toMatchObject({ recheckMs: 5_000 });
+  // Certified again and attached on the agent's node before the session opened.
+  expect(gone.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(2);
+  expect(startsAtAttach).toEqual([1]);
+  expect(gone.state.starts).toHaveLength(2);
+  expect(parseRemoteState(latestOf(gone).row.remote)).toMatchObject({ resumed: true, validBefore: iso(T0 + 40 * 60_000) });
+
+  // Still attached, but inside the renewal window: renewed first.
+  resetRemoteTurnsForTests();
+  const ending = harness((await remoteAttempt()).attempt);
+  await ending.drive();
+  resetRemoteTurnsForTests();
+  ending.state.now = T0 + 25 * 60_000;
+  await ending.drive();
+  expect(ending.sent(BENCH_COORDINATOR_VERB, "attach")).toHaveLength(2);
+  expect(ending.state.starts).toHaveLength(2);
+
+  // The agent's node cannot be reached: nothing opens, and the resume is still owed.
+  resetRemoteTurnsForTests();
+  const unreachable = harness((await remoteAttempt()).attempt);
+  await unreachable.drive();
+  resetRemoteTurnsForTests();
+  unreachable.state.status = {};
+  unreachable.state.agentAttach = () => ({ ok: false, error: "request timed out" });
+  unreachable.state.now = T0 + 60_000;
+  expect((await unreachable.drive()).recheckMs).toBeUndefined();
+  expect(unreachable.state.starts).toHaveLength(1);
+  expect(parseRemoteState(latestOf(unreachable).row.remote)).toMatchObject({ resumed: false });
+
+  // It refuses outright: the run fails, after a detach, and nothing opens.
+  unreachable.state.agentAttach = () => ({ ok: true, data: { state: "refused", code: "terminal_in_use", message: "busy" } });
+  await unreachable.drive();
+  expect(unreachable.state.failure).toMatchObject({ code: "terminal_in_use", phase: "working" });
+  expect(unreachable.state.starts).toHaveLength(1);
+});
+
+test("a detached attempt is never attached, resumed or finished again, whatever its phase", async () => {
+  for (const phase of ["attach_pending", "working", "finish_pending"]) {
+    resetRemoteTurnsForTests();
+    const { attempt } = await remoteAttempt();
+    const h = harness(attempt);
+    await h.drive();
+    const state = parseRemoteState(latestOf(h).row.remote);
+    if (!state) throw new Error("no remote state");
+    resetRemoteTurnsForTests();
+    h.state.latest = { ...latestOf(h), row: { ...latestOf(h).row, phase,
+      remote: canonicalCheckpoint({ ...state, detached: true, ...(phase === "finish_pending" ? { finishRequest: "{}" } : {}) }) } };
+    const calls = h.calls.length, beats = h.heartbeats();
+    expect((await h.drive()).recheckMs).toBeUndefined();
+    expect(h.calls.slice(calls).filter((c) => c.verb !== BENCH_COORDINATOR_VERB || c.params.operation !== "status")).toEqual([]);
+    expect(h.heartbeats()).toBe(beats);
+    expect(h.state.starts).toHaveLength(1);
+  }
 });

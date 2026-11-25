@@ -316,6 +316,7 @@ const hubAcpPort: AcpPort = {
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
   withStationLock: (stationId, fn) => acpSessions.withStationOpenLock(stationId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),
+  closeStationSessions: ({ tenantId, stationId }, reason) => acpSessions.closeStationSessions(tenantId, stationId, reason),
   answerPermission: (userId, sessionId, requestSeq, optionId, answeredBy) =>
     acpSessions.answerPermission(userId, sessionId, requestSeq, optionId, answeredBy),
 };

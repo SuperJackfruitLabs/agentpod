@@ -49,7 +49,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   `run_ended`. After a hub restart the agent is told once, in a fresh session,
   to continue, while its station is online and the stage's time limit (which
   counts from the first turn, across restarts and dirty-tree retries) has time
-  left. A superseded remote attempt detaches too. A detach that did not
+  left, and only once the station's node confirms every earlier session's
+  process closed and holds the attachment (the station is attached again when
+  it does not, or when its certificate is ending). A superseded remote
+  attempt, and one an operator settles, detach too. A boot or reconnect close
+  of an orphaned agent process the node did not confirm now keeps its marker,
+  so it is closed again. A detach that did not
   confirm keeps the station busy until the detach sweep, every five minutes
   with the bench clearing, gets an answer from the agent's node. A failing
   re-attach after a dirty tree waits a minute between tries.

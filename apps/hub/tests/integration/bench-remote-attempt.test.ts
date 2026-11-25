@@ -37,6 +37,7 @@ import { resetRemoteTurnsForTests, stationBenchBusy } from "../../src/services/b
 import { sweepRemoteDetach } from "../../src/services/bridge/checkpoint-remote-sweep";
 import { startBenchClearing } from "../../src/services/bridge/bench-clearing";
 import { resolveSupersededAttempt } from "../../src/services/bridge/checkpoint-supersede";
+import { adminCheckpointAttemptsRouter } from "../../src/routes/admin-checkpoint-attempts";
 import { parseRemoteState } from "../../src/services/bridge/checkpoint-remote-state";
 import { REMOTE_TURN_PREFACE } from "../../src/services/bridge/checkpoint-remote-turn";
 import { runOnce } from "../../src/services/bridge/dispatch";
@@ -579,6 +580,30 @@ test("detach sweep retries until the agent's node answers", async () => {
   expect(await stationBenchBusy(tenantId, stationId)).toBe(false);
   await sweepRemoteDetach();
   expect(asked()).toBe(2);
+});
+
+test("an operator's retirement of a remote attempt stops its agent and detaches the station at once", async () => {
+  await onRun("r6", async () => {
+    const client = await checkpointAgentClient(profile);
+    expect(await driveCheckpointAttempt(attempt, client, true, deps())).toMatchObject({ recheckMs: 5_000 });
+    expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
+    const ended = seen.ended.length, detaches = seen.agent.filter((c) => c.verb === "bench.remote.detach").length;
+    const admin = new Hono().use("*", async (c, next) => {
+      c.set("user", { id: "usr_admin" + suffix, authType: "org_plane", tenantId });
+      await next();
+    }).route("/checkpoint/attempts", adminCheckpointAttemptsRouter);
+    const response = await admin.request(`/checkpoint/attempts/${attempt.row.attemptId}/settle`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: attempt.row.attemptId,
+        evidence: "Checked the bench host's journal and the board: the agent's run is abandoned." }) });
+    expect(response.status).toBe(200);
+    // Its live turn is cancelled (the session ended), and the station detached and recorded so, in the same request.
+    expect(seen.ended.length).toBe(ended + 1);
+    expect(seen.agent.filter((c) => c.verb === "bench.remote.detach")).toHaveLength(detaches + 1);
+    const row = await stored();
+    expect(row.phase).toBe("retired");
+    expect(parseRemoteState(row.remote)).toMatchObject({ detached: true });
+    expect(await stationBenchBusy(tenantId, stationId)).toBe(false);
+  });
 });
 
 test("superseded remote attempt detaches", async () => {

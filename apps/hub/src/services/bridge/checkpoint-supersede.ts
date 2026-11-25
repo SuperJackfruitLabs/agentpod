@@ -48,7 +48,7 @@ export interface NodeStatusSummary {
 }
 
 /** The attempt as this path reads it: its phase. Generic so tests need no ledger row. */
-interface Phased { row: { phase: string } }
+interface Phased { row: { phase: string; tenantId?: string; attemptId?: string } }
 
 export interface SupersedeDeps<A extends Phased = RetainedCheckpointAttempt> {
   status(attempt: A): Promise<NodeStatusSummary>;
@@ -93,7 +93,8 @@ export function resolveSupersededAttempt(attempt: RetainedCheckpointAttempt): Pr
 export function resolveSupersededAttempt<A extends Phased>(attempt: A, deps: SupersedeDeps<A>): Promise<SupersededResolution>;
 export async function resolveSupersededAttempt(attempt: Phased,
   deps: SupersedeDeps<Phased> = defaults): Promise<SupersededResolution> {
-  if (deps.detach) await deps.detach(attempt).catch((error: unknown) => noteCheckpoint("superseded", "remote.detach", {}, error));
+  if (deps.detach) await deps.detach(attempt).catch((error: unknown) => noteCheckpoint("superseded", "remote.detach",
+    { tenantId: attempt.row.tenantId, attemptId: attempt.row.attemptId, phase: attempt.row.phase }, error));
   if (!NO_PRODUCER_EFFECT_PHASES.has(attempt.row.phase)) return { outcome: "parked", reason: "superseded.effect_possible" };
   let reply: NodeStatusSummary;
   try { reply = await deps.status(attempt); }

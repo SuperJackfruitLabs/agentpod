@@ -110,6 +110,8 @@ export interface FakeAcpNodeOpts {
    * process and would otherwise race their own teardown.
    */
   exitOnClose?: boolean;
+  /** Refuse every acp.close (ok: false): a node that cannot confirm the process is gone. Read per request. */
+  closeFails?: boolean;
   /**
    * Never answer the named handshake request (wedged-agent simulation).
    * Mutable — clear it between createSession attempts to let one succeed.
@@ -628,6 +630,10 @@ export async function connectFakeAcpNode(
           const wanted = (msg.params as { sessionId?: string } | undefined)
             ?.sessionId;
           const proc = processes.find((p) => p.sessionId === String(wanted));
+          if (opts.closeFails) {
+            ws.send(JSON.stringify({ type: "res", id, ok: false, error: "close failed" }));
+            break;
+          }
           if (proc) {
             if (opts.exitOnClose && !proc.closed) {
               // The process dies: exit frame then eof on every attached stream,
