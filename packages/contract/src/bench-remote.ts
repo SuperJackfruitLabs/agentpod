@@ -1,5 +1,5 @@
 /**
- * Remote bench verbs on the agent's node (Go `internal/benchremote`): a Hermes station works in a
+ * Remote bench verbs on the agent's node (Go `internal/benchattach`): a Hermes station works in a
  * card's bench through the bench's SSH door.
  *
  * - `bench.identity.ensure` returns the station's bench public key, generated on first ask. The
@@ -41,7 +41,7 @@ export type BenchRemoteCredential = z.infer<typeof BenchRemoteCredential>;
 
 /** Why a verb changed nothing (Go `benchattach.Code*`, plus `unavailable` for a node-side failure). */
 export const BenchRemoteRefusalCode = z.enum([
-  "harness_unsupported", "terminal_in_use", "attached_elsewhere", "credential_files", "invalid", "unavailable",
+  "harness_unsupported", "terminal_in_use", "attached_elsewhere", "credential_files", "plugin_missing", "invalid", "unavailable",
 ]);
 export type BenchRemoteRefusalCode = z.infer<typeof BenchRemoteRefusalCode>;
 

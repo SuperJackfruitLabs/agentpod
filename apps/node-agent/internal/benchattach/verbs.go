@@ -1,10 +1,9 @@
-// Package benchremote answers the hub's remote-bench verbs on the agent's node:
-// `bench.identity.ensure`, `bench.remote.attach`, `bench.remote.detach` and `bench.remote.status`
-// (contract `packages/contract/src/bench-remote.ts`).
-//
-// Its own package rather than a file in internal/gateway, which is at its size limit; it wraps a
-// gateway.Handler the same way every verb there does.
-package benchremote
+package benchattach
+
+// The hub's remote-bench verbs on the agent's node: `bench.identity.ensure`,
+// `bench.remote.attach`, `bench.remote.detach` and `bench.remote.status` (contract
+// `packages/contract/src/bench-remote.ts`). Here rather than in internal/gateway, which is at its
+// size limit; the handler wraps a gateway.Handler the same way every verb there does.
 
 import (
 	"bytes"
@@ -15,7 +14,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattach"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 )
@@ -30,20 +28,22 @@ const (
 	VerbStatus = "bench.remote.status"
 )
 
-// Deps are the handler's seams.
-type Deps struct {
+// HandlerDeps are the verb handler's seams.
+type HandlerDeps struct {
 	Root       string
-	Manager    benchattach.Manager
+	Manager    Manager
 	HarnessFor func(stationKey string) (string, error)
 }
 
 type handler struct {
 	inner gateway.Handler
-	deps  Deps
+	deps  HandlerDeps
 }
 
-// New wraps inner with the remote-bench verbs.
-func New(inner gateway.Handler, deps Deps) gateway.Handler { return &handler{inner: inner, deps: deps} }
+// NewHandler wraps inner with the remote-bench verbs.
+func NewHandler(inner gateway.Handler, deps HandlerDeps) gateway.Handler {
+	return &handler{inner: inner, deps: deps}
+}
 
 // Credential is the certificate reply SuperBench issued, as the bench host's node relayed it.
 // Public material only: the lease token never reaches this node.
@@ -128,10 +128,10 @@ func (h *handler) Handle(ctx context.Context, verb string, params json.RawMessag
 func (h *handler) ensure(raw json.RawMessage) any {
 	var p ensureParams
 	if err := strict(raw, &p); err != nil {
-		return refused(benchattach.CodeInvalid, "bad params: "+err.Error())
+		return refused(CodeInvalid, "bad params: "+err.Error())
 	}
 	if !benchidentity.ValidStationID(p.StationID) || p.StationKey == "" {
-		return refused(benchattach.CodeInvalid, "stationId and stationKey are required")
+		return refused(CodeInvalid, "stationId and stationKey are required")
 	}
 	pub, _, _, err := benchidentity.EnsureKey(h.deps.Root, p.StationID, p.StationKey)
 	if err != nil {
@@ -144,21 +144,21 @@ func (h *handler) ensure(raw json.RawMessage) any {
 func (h *handler) attach(ctx context.Context, raw json.RawMessage) any {
 	var p attachParams
 	if err := strict(raw, &p); err != nil {
-		return refused(benchattach.CodeInvalid, "bad params: "+err.Error())
+		return refused(CodeInvalid, "bad params: "+err.Error())
 	}
 	if p.Credential == nil || p.StationKey == "" {
-		return refused(benchattach.CodeInvalid, "stationKey and credential are required")
+		return refused(CodeInvalid, "stationKey and credential are required")
 	}
 	harness, err := h.deps.HarnessFor(p.StationKey)
 	if err != nil || harness != "hermes" {
-		return refused(benchattach.CodeHarnessUnsupported, fmt.Sprintf("a remote bench needs a Hermes station; %q is not one", p.StationKey))
+		return refused(CodeHarnessUnsupported, fmt.Sprintf("a remote bench needs a Hermes station; %q is not one", p.StationKey))
 	}
 	validBefore, err := time.Parse(time.RFC3339Nano, p.Credential.ValidBefore)
 	if err != nil {
-		return refused(benchattach.CodeInvalid, "credential.valid_before is not an RFC 3339 time")
+		return refused(CodeInvalid, "credential.valid_before is not an RFC 3339 time")
 	}
 	c := p.Credential
-	until, err := h.deps.Manager.Attach(ctx, benchattach.Attachment{
+	until, err := h.deps.Manager.Attach(ctx, Attachment{
 		StationID: p.StationID, StationKey: p.StationKey, AttemptID: p.AttemptID,
 		Certificate: c.Certificate, User: c.User, Address: c.Address, HostKey: c.HostKey,
 		WorkingDirectory: c.WorkingDirectory, ValidBefore: validBefore,
@@ -172,10 +172,10 @@ func (h *handler) attach(ctx context.Context, raw json.RawMessage) any {
 func (h *handler) detach(ctx context.Context, raw json.RawMessage) any {
 	var p detachParams
 	if err := strict(raw, &p); err != nil {
-		return refused(benchattach.CodeInvalid, "bad params: "+err.Error())
+		return refused(CodeInvalid, "bad params: "+err.Error())
 	}
 	if p.AttemptID == "" {
-		return refused(benchattach.CodeInvalid, "attemptId is required")
+		return refused(CodeInvalid, "attemptId is required")
 	}
 	state, err := h.deps.Manager.Detach(ctx, p.StationID, p.AttemptID)
 	if err != nil {
@@ -187,10 +187,10 @@ func (h *handler) detach(ctx context.Context, raw json.RawMessage) any {
 func (h *handler) status(raw json.RawMessage) any {
 	var p statusParams
 	if err := strict(raw, &p); err != nil {
-		return refused(benchattach.CodeInvalid, "bad params: "+err.Error())
+		return refused(CodeInvalid, "bad params: "+err.Error())
 	}
 	if !benchidentity.ValidStationID(p.StationID) {
-		return refused(benchattach.CodeInvalid, "stationId is required")
+		return refused(CodeInvalid, "stationId is required")
 	}
 	attempt, until, ok := h.deps.Manager.Status(p.StationID)
 	if !ok {
@@ -200,7 +200,7 @@ func (h *handler) status(raw json.RawMessage) any {
 }
 
 func refusalOf(err error) Refused {
-	var r *benchattach.Refusal
+	var r *Refusal
 	if errors.As(err, &r) {
 		return refused(r.Code, r.Message)
 	}

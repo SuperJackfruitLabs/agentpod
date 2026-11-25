@@ -1,4 +1,4 @@
-package benchremote
+package benchattach
 
 import (
 	"context"
@@ -8,13 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattach"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 )
 
 // The same bodies the contract's bench-remote.test.ts parses.
-type fixture struct {
+type wireFixture struct {
 	Valid   map[string]json.RawMessage `json:"valid"`
 	Invalid []struct {
 		Verb   string          `json:"verb"`
@@ -23,18 +22,20 @@ type fixture struct {
 	} `json:"invalid"`
 }
 
-func loadFixture(t *testing.T) fixture {
+func loadFixture(t *testing.T) wireFixture {
 	t.Helper()
 	raw, err := os.ReadFile("../../../../packages/contract/src/fixtures/bench-remote-v1.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var f fixture
+	var f wireFixture
 	if err := json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
 	return f
 }
+
+const verbsConfig = "model:\n  default: kimi\nplugins:\n  enabled: [agentpod-live]\n"
 
 type innerHandler struct{ called string }
 
@@ -46,15 +47,16 @@ func (h *innerHandler) Handle(_ context.Context, verb string, _ json.RawMessage,
 func newHandler(t *testing.T, harness string) (*handler, string) {
 	t.Helper()
 	root, profile := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("model:\n  default: kimi\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte(verbsConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	installPlugin(t, profile, "0.3.0")
 	keyPath := benchidentity.KeyPath(root, "st_remote1")
 	_ = os.MkdirAll(filepath.Dir(keyPath), 0o700)
 	_ = os.WriteFile(keyPath, []byte("placeholder"), 0o600)
-	m := benchattach.Manager{Root: root, KnownHosts: filepath.Join(t.TempDir(), "known_hosts"), Terminal: hermes.HermesTerminal{},
+	m := Manager{Root: root, KnownHosts: filepath.Join(t.TempDir(), "known_hosts"), Terminal: hermes.HermesTerminal{},
 		Profile: func(string) (string, error) { return profile, nil }}
-	h := New(&innerHandler{}, Deps{Root: root, Manager: m, HarnessFor: func(string) (string, error) {
+	h := NewHandler(&innerHandler{}, HandlerDeps{Root: root, Manager: m, HarnessFor: func(string) (string, error) {
 		if harness == "" {
 			return "", errors.New("no such station")
 		}
@@ -80,7 +82,7 @@ func TestVerbsStrictDecode(t *testing.T) {
 	h, _ := newHandler(t, "hermes")
 	for _, c := range f.Invalid {
 		got := call(t, h, c.Verb, c.Params)
-		if got["state"] != "refused" || got["code"] != benchattach.CodeInvalid {
+		if got["state"] != "refused" || got["code"] != CodeInvalid {
 			t.Errorf("%s (%s) = %v, want refused invalid", c.Verb, c.Why, got)
 		}
 	}
@@ -111,7 +113,7 @@ func TestAttachDetachStatusThroughTheVerbs(t *testing.T) {
 	if got := call(t, h, VerbStatus, f.Valid[VerbStatus]); len(got) != 0 {
 		t.Fatalf("status after detach = %v", got)
 	}
-	if data, _ := os.ReadFile(filepath.Join(profile, "config.yaml")); string(data) != "model:\n  default: kimi\n" {
+	if data, _ := os.ReadFile(filepath.Join(profile, "config.yaml")); string(data) != verbsConfig {
 		t.Fatalf("profile after detach = %q", data)
 	}
 }
@@ -120,7 +122,7 @@ func TestAttachRefusesANonHermesStation(t *testing.T) {
 	f := loadFixture(t)
 	for _, harness := range []string{"openclaw", ""} {
 		h, _ := newHandler(t, harness)
-		if got := call(t, h, VerbAttach, f.Valid[VerbAttach]); got["code"] != benchattach.CodeHarnessUnsupported {
+		if got := call(t, h, VerbAttach, f.Valid[VerbAttach]); got["code"] != CodeHarnessUnsupported {
 			t.Errorf("%q: attach = %v", harness, got)
 		}
 	}

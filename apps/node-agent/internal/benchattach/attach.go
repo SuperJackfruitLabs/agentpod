@@ -7,7 +7,12 @@
 //  2. pins the bench host key as a managed line in the gateway user's known_hosts;
 //  3. edits the profile's `terminal:` section to Hermes's SSH backend, with `cwd` always set to
 //     the bench's working directory, and records the attachment for the agentpod-live plugin;
-//  4. journals what it did, so detach needs nobody's help, after a restart too.
+//  4. marks the journal attached.
+//
+// The journal is written first, as `attaching`, holding the profile's original terminal lines
+// before anything is touched; it becomes `attached` last. A node that dies part way leaves an
+// `attaching` record, and the sweep (or the next detach or attach) undoes whatever had been done
+// from it, so no crash can strand a profile pointed at a bench.
 //
 // Neither verb restarts the gateway. Hermes reads the profile per session: an open ACP session
 // keeps the backend it started with, and the next session gets the new one, so the hub opens a
@@ -21,6 +26,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,6 +35,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 )
 
 // Refusal codes. A refusal changes nothing.
@@ -38,6 +45,7 @@ const (
 	CodeAttachedElsewhere  = "attached_elsewhere"
 	CodeFileMounts         = "credential_files"
 	CodeInvalid            = "invalid"
+	CodePluginMissing      = "plugin_missing"
 )
 
 // Detach outcomes.
@@ -75,7 +83,17 @@ type Manager struct {
 	KnownHosts string
 	Terminal   hermes.TerminalWriter
 	Profile    func(stationKey string) (string, error)
-	Now        func() time.Time
+	// PluginReady confirms the profile's agentpod-live can carry an attachment (nil error).
+	// hermeslive.BenchReady when unset.
+	PluginReady func(profileDir string) error
+	Now         func() time.Time
+}
+
+func (m Manager) pluginReady(profileDir string) error {
+	if m.PluginReady != nil {
+		return m.PluginReady(profileDir)
+	}
+	return hermeslive.BenchReady(profileDir)
 }
 
 // mu serialises every attach, detach and sweep in this process: they share files.
@@ -85,7 +103,7 @@ var (
 	attemptPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	userPattern    = regexp.MustCompile(`^b-[a-f0-9]{32}$`)
 	certPattern    = regexp.MustCompile(`^(ssh-ed25519|ecdsa-sha2-nistp256)-cert-v01@openssh\.com [A-Za-z0-9+/]+={0,2}( [^\x00-\x1f]*)?$`)
-	hostKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,2}$`)
+	hostKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,2}( [ -~]*)?$`)
 )
 
 func (m Manager) now() time.Time {
@@ -134,6 +152,13 @@ func (m Manager) Attach(_ context.Context, a Attachment) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
+	if ok && existing.State == stateAttaching {
+		// A leftover from a node that died mid-attach: undo it before anything else.
+		if _, err := m.detach(existing); err != nil {
+			return time.Time{}, err
+		}
+		ok = false
+	}
 	if ok {
 		if existing.AttemptID == a.AttemptID {
 			return m.renew(existing, a)
@@ -162,6 +187,9 @@ func (m Manager) Attach(_ context.Context, a Attachment) (time.Time, error) {
 		return time.Time{}, refuse(CodeFileMounts, "Hermes would copy credential files to the bench: %s",
 			strings.Join(inspection.CredentialMounts, "; "))
 	}
+	if err := m.pluginReady(profileDir); err != nil {
+		return time.Time{}, refuse(CodePluginMissing, "%v", err)
+	}
 	keyPath := benchidentity.KeyPath(m.Root, a.StationID)
 	if _, err := os.Stat(keyPath); err != nil {
 		return time.Time{}, refuse(CodeInvalid, "the station has no bench identity; ensure it first")
@@ -175,34 +203,49 @@ func (m Manager) Attach(_ context.Context, a Attachment) (time.Time, error) {
 		Terminal: hermes.SSHTerminal{Host: host, Port: port, User: a.User, KeyPath: keyPath, Cwd: a.WorkingDirectory},
 	}
 
-	// 1. certificate
-	if err := writeCert(keyPath, a.Certificate); err != nil {
+	// 0. journal, attaching, with the original lines, before any edit
+	prior, err := m.Terminal.Prior(profileDir)
+	if err != nil {
 		return time.Time{}, err
 	}
-	undo := []func(){func() { _ = os.Remove(benchidentity.CertPath(keyPath)) }}
+	r.State, r.Prior = stateAttaching, prior
+	if err := writeRecord(m.Root, r); err != nil {
+		return time.Time{}, err
+	}
+	undo := []func(){func() { _ = removeRecord(m.Root, a.StationID) }}
 	fail := func(err error) (time.Time, error) {
 		for i := len(undo) - 1; i >= 0; i-- {
 			undo[i]()
 		}
 		return time.Time{}, err
 	}
+	// 1. certificate
+	if err := writeCert(keyPath, a.Certificate); err != nil {
+		return fail(err)
+	}
+	undo = append(undo, func() { _ = os.Remove(benchidentity.CertPath(keyPath)) })
 	// 2. host key pin
 	if err := pin(m.KnownHosts, a.StationID, a.AttemptID, line); err != nil {
 		return fail(fmt.Errorf("benchattach: pinning host key: %w", err))
 	}
 	undo = append(undo, func() { _ = unpin(m.KnownHosts, a.StationID, a.AttemptID, line) })
 	// 3. terminal section, then the plugin's state
-	prior, err := m.Terminal.SetSSH(profileDir, r.Terminal)
+	wrote, err := m.Terminal.SetSSH(profileDir, r.Terminal)
 	if err != nil {
 		return fail(err)
 	}
-	r.Prior = prior
-	undo = append(undo, func() { _, _ = m.Terminal.Restore(profileDir, r.Terminal, prior) })
+	undo = append(undo, func() { _, _ = m.Terminal.Restore(profileDir, r.Terminal, wrote) })
+	if !reflect.DeepEqual(viaJSON(wrote), viaJSON(prior)) {
+		// The profile changed between the journal and the edit; the journal would restore the
+		// wrong lines.
+		return fail(fmt.Errorf("benchattach: the profile changed while attaching; retry"))
+	}
 	if err := m.Terminal.WriteState(profileDir, r.state()); err != nil {
 		return fail(err)
 	}
 	undo = append(undo, func() { _ = m.Terminal.RemoveState(profileDir) })
-	// 4. journal
+	// 4. journal, attached
+	r.State = stateAttached
 	if err := writeRecord(m.Root, r); err != nil {
 		return fail(err)
 	}
@@ -252,6 +295,13 @@ func (m Manager) Detach(_ context.Context, stationID, attemptID string) (string,
 	if err != nil {
 		return "", err
 	}
+	if ok && r.State == stateAttaching {
+		// Whatever attempt it names, it is a crash's leftover; undo it.
+		if _, err := m.detach(r); err != nil {
+			return "", err
+		}
+		return StateAbsent, nil
+	}
 	if !ok || (attemptID != "" && r.AttemptID != attemptID) {
 		return StateAbsent, nil
 	}
@@ -266,8 +316,9 @@ func (m Manager) detach(r record) (string, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) && !profileGone(r.ProfileDir) {
 		return "", err
 	}
-	if changed {
-		// Someone else rewrote the terminal section since; theirs stands.
+	if changed && r.State != stateAttaching {
+		// Someone else rewrote the terminal section since; theirs stands. (For an attach that
+		// died before its edit, "changed" only means the edit never happened.)
 		state = StateTerminalChanged
 	}
 	if err := m.Terminal.RemoveState(r.ProfileDir); err != nil && !profileGone(r.ProfileDir) {
@@ -299,7 +350,7 @@ func (m Manager) Status(stationID string) (attemptID string, validBefore time.Ti
 		return "", time.Time{}, false
 	}
 	r, found, err := readRecord(m.Root, stationID)
-	if err != nil || !found {
+	if err != nil || !found || r.State == stateAttaching {
 		return "", time.Time{}, false
 	}
 	return r.AttemptID, r.ValidBefore, true

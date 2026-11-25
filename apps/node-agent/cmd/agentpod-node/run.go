@@ -14,7 +14,6 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattach"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchbridge"
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
@@ -274,7 +273,7 @@ func runCmd() {
 		Terminal:   hermes.HermesTerminal{},
 		Profile:    resolver.Workspace,
 	}
-	h = benchremote.New(h, benchremote.Deps{Root: gitIdentityRoot, Manager: benchAttach, HarnessFor: harnessFor})
+	h = benchattach.NewHandler(h, benchattach.HandlerDeps{Root: gitIdentityRoot, Manager: benchAttach, HarnessFor: harnessFor})
 	// An attachment whose certificate expired is taken back without waiting for the hub.
 	go benchAttach.RunSweep(ctx, time.Minute)
 	// forge.api: one stk instance per station, created lazily at the first deliver or status for
@@ -353,7 +352,7 @@ func runCmd() {
 	// the leases this node holds); answered like every coordinator operation, refused with no registry.
 	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability, benchbridge.ReclaimCapability, benchremote.Capability)
 	// bench.remote.attach: this node can point a Hermes station at a remote bench.
-	extras.Capabilities = append(extras.Capabilities, benchremote.AttachCapability)
+	extras.Capabilities = append(extras.Capabilities, benchattach.AttachCapability)
 	// RunWith returns only when ctx is done; shutdown is not an error worth reporting.
 	_ = gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)

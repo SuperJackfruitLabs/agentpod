@@ -55,6 +55,9 @@ type TerminalInspection struct {
 // TerminalWriter edits a Hermes profile for a remote bench and undoes the edit exactly.
 type TerminalWriter interface {
 	Inspect(profileDir string) (TerminalInspection, error)
+	// Prior is what SetSSH would return for the profile as it is now, without writing anything:
+	// attach journals it before the edit, so a crash part way can still be undone exactly.
+	Prior(profileDir string) (map[string]any, error)
 	// SetSSH edits only config.yaml's terminal.{backend,ssh_host,ssh_port,ssh_user,ssh_key,cwd}
 	// and returns what Restore needs to put those lines back byte for byte.
 	SetSSH(profileDir string, t SSHTerminal) (prior map[string]any, err error)
@@ -213,6 +216,16 @@ func frontmatter(data []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return []byte(text[4 : 4+end]), true
+}
+
+// Prior reads the restore record SetSSH would produce, and writes nothing.
+func (HermesTerminal) Prior(profileDir string) (map[string]any, error) {
+	config, _, err := readConfig(profileDir)
+	if err != nil {
+		return nil, err
+	}
+	prior, _, err := terminalPrior(config)
+	return prior, err
 }
 
 // SetSSH writes the six terminal keys, one line each, keeping every other line as it was.

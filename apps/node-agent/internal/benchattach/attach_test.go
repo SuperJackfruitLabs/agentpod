@@ -49,6 +49,7 @@ func newFixture(t *testing.T) *fixture {
 	// The key is ssh-keygen's to make (benchidentity's test); a placeholder stands in for it here.
 	keyPath := benchidentity.KeyPath(root, station)
 	mustWrite(t, keyPath, "placeholder private key")
+	installPlugin(t, profile, "0.3.0")
 	now := t0
 	f := &fixture{profile: profile, knownHosts: kh, keyPath: keyPath, now: &now}
 	f.m = Manager{Root: root, KnownHosts: kh, Terminal: hermes.HermesTerminal{}, Now: func() time.Time { return *f.now },
@@ -59,6 +60,14 @@ func newFixture(t *testing.T) *fixture {
 			return profile, nil
 		}}
 	return f
+}
+
+// installPlugin puts agentpod-live's manifest in the profile, as `apn hermes-live` would; the
+// fixture's config already enables it.
+func installPlugin(t *testing.T, profile, version string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(profile, "plugins", "agentpod-live", "plugin.yaml"),
+		"name: agentpod-live\nversion: \""+version+"\"\n")
 }
 
 func mustWrite(t *testing.T, path, content string) {
@@ -381,4 +390,100 @@ func TestAttachRefusesInvalid(t *testing.T) {
 		}
 	}
 	assertUntouched(t, f, profileConfig)
+}
+
+func TestAttachRefusesPluginMissing(t *testing.T) {
+	cases := map[string]func(*fixture){
+		"not installed": func(f *fixture) { _ = os.RemoveAll(filepath.Join(f.profile, "plugins")) },
+		"too old":       func(f *fixture) { installPlugin(t, f.profile, "0.2.0") },
+		"not enabled": func(f *fixture) {
+			mustWrite(t, filepath.Join(f.profile, "config.yaml"), strings.Replace(profileConfig, "[agentpod-live]", "[]", 1))
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			mutate(f)
+			config := f.config(t)
+			if _, err := f.m.Attach(context.Background(), attachment("att-1", certA, 30*time.Minute)); code(err) != CodePluginMissing {
+				t.Fatalf("Attach = %v", err)
+			}
+			assertUntouched(t, f, config)
+		})
+	}
+}
+
+// crashing stands in for a node that dies after the terminal edit, before the plugin's state
+// and the journal's "attached": it panics, so no rollback runs.
+type crashing struct{ hermes.HermesTerminal }
+
+func (crashing) WriteState(string, hermes.BenchState) error { panic("node died") }
+
+func TestSweepRecoversACrashAfterTheTerminalEdit(t *testing.T) {
+	for _, recover_ := range []string{"sweep", "detach", "attach"} {
+		t.Run(recover_, func(t *testing.T) {
+			f := newFixture(t)
+			crashed := f.m
+			crashed.Terminal = crashing{}
+			func() {
+				defer func() { _ = recover() }()
+				_, _ = crashed.Attach(context.Background(), attachment("att-1", certA, 30*time.Minute))
+				t.Fatal("the crash did not happen")
+			}()
+			if !strings.Contains(f.config(t), "backend: ssh") || !strings.Contains(read(t, f.knownHosts), markerPrefix) {
+				t.Fatal("the simulated crash came before the terminal edit")
+			}
+			if _, _, ok := f.m.Status(station); ok {
+				t.Fatal("a half-done attach reports as attached")
+			}
+			switch recover_ {
+			case "sweep":
+				f.m.Sweep(t0) // long before any expiry
+			case "detach":
+				if state, err := f.m.Detach(context.Background(), station, "att-other"); err != nil || state != StateAbsent {
+					t.Fatalf("Detach = %q, %v", state, err)
+				}
+			case "attach":
+				if _, err := f.m.Attach(context.Background(), attachment("att-2", certB, 30*time.Minute)); err != nil {
+					t.Fatalf("Attach after the crash = %v", err)
+				}
+				if _, err := f.m.Detach(context.Background(), station, "att-2"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := f.config(t); got != profileConfig {
+				t.Fatalf("config.yaml not restored byte for byte:\nwant %q\ngot  %q", profileConfig, got)
+			}
+			if got := read(t, f.knownHosts); got != otherHosts {
+				t.Fatalf("known_hosts not restored: %q", got)
+			}
+			for _, p := range []string{benchidentity.CertPath(f.keyPath), journalPath(f.m.Root, station)} {
+				if _, err := os.Stat(p); !os.IsNotExist(err) {
+					t.Errorf("%s survived the recovery", p)
+				}
+			}
+		})
+	}
+}
+
+func TestSweepRecoversACrashBeforeAnyEdit(t *testing.T) {
+	f := newFixture(t)
+	prior, err := hermes.HermesTerminal{}.Prior(f.profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The journal is the first write: a crash right after it leaves only the record.
+	r := record{StationID: station, StationKey: key, AttemptID: "att-1", ProfileDir: f.profile, State: stateAttaching,
+		KeyPath: f.keyPath, Pinned: "[100.64.0.9]:2222 " + hostKey, Prior: prior,
+		Terminal: hermes.SSHTerminal{Host: "100.64.0.9", Port: 2222, User: benchU, KeyPath: f.keyPath, Cwd: workDir}}
+	if err := writeRecord(f.m.Root, r); err != nil {
+		t.Fatal(err)
+	}
+	f.m.Sweep(t0)
+	if f.config(t) != profileConfig || read(t, f.knownHosts) != otherHosts {
+		t.Fatal("recovering an attach that never edited changed the profile")
+	}
+	if _, err := os.Stat(journalPath(f.m.Root, station)); !os.IsNotExist(err) {
+		t.Fatal("the leftover record survived")
+	}
 }

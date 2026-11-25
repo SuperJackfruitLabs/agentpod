@@ -1,5 +1,5 @@
 /**
- * The same bodies as the node's `internal/benchremote` TestVerbsStrictDecode
+ * The same bodies as the node's `internal/benchattach` TestVerbsStrictDecode
  * (`fixtures/bench-remote-v1.json`): what one side accepts the other accepts, and an unknown field
  * is refused by both.
  */

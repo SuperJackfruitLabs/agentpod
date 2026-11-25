@@ -30,9 +30,11 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   points the profile's `terminal:` section at the bench, `cwd` included.
   Detach restores `config.yaml` and `known_hosts` byte for byte, or leaves a
   terminal section someone else has since changed (`terminal_changed`). Attach
-  refuses a profile that would copy credential files to the bench, and an
-  expiry sweep detaches five minutes after a certificate lapses. Neither verb
-  restarts the gateway.
+  refuses a profile that would copy credential files to the bench, or one
+  without `agentpod-live` 0.3.0 or later enabled (`plugin_missing`). It
+  journals before its first edit, so an attach a crash left half done is undone
+  by the sweep, which also detaches five minutes after a certificate lapses.
+  Neither verb restarts the gateway.
 - `agentpod-live` 0.3.0: while its profile is attached to a remote bench, the
   plugin rewrites replace-mode `patch` calls into the equivalent V4A patch (the
   only form ACP edit approval can preview remotely), blocks `replace_all` with

@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// Sweep detaches every attachment whose certificate expired more than SweepGrace ago. Nothing
-// else would: a hub that lost track of an attempt never sends its detach, and the profile would
-// stay pointed at a door that refuses it.
+// Sweep detaches every attachment whose certificate expired more than SweepGrace ago, and undoes
+// every attach a crash left half done. Nothing else would: a hub that lost track of an attempt
+// never sends its detach, and the profile would stay pointed at a door that refuses it.
 func (m Manager) Sweep(now time.Time) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -18,7 +18,8 @@ func (m Manager) Sweep(now time.Time) {
 			log.Printf("benchattach: sweep: %v", err)
 			continue
 		}
-		if !ok || !now.After(r.ValidBefore.Add(SweepGrace)) {
+		// Under mu no attach is in flight, so an attaching record is a crash's leftover.
+		if !ok || (r.State != stateAttaching && !now.After(r.ValidBefore.Add(SweepGrace))) {
 			continue
 		}
 		if _, err := m.detach(r); err != nil {

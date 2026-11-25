@@ -17,6 +17,7 @@ import (
 // anyone, including after a node restart and after the station itself is gone.
 type record struct {
 	Version          int                `json:"version"`
+	State            string             `json:"state"`
 	StationID        string             `json:"station_id"`
 	StationKey       string             `json:"station_key"`
 	AttemptID        string             `json:"attempt_id"`
@@ -31,6 +32,20 @@ type record struct {
 	Terminal         hermes.SSHTerminal `json:"terminal"`
 	Prior            map[string]any     `json:"prior"`
 	AttachedAt       time.Time          `json:"attached_at"`
+}
+
+// Journal states. A record from before states existed has none and is attached.
+const (
+	stateAttaching = "attaching"
+	stateAttached  = "attached"
+)
+
+// viaJSON is a value as the journal will read it back.
+func viaJSON(v map[string]any) map[string]any {
+	data, _ := json.Marshal(v)
+	var out map[string]any
+	_ = json.Unmarshal(data, &out)
+	return out
 }
 
 func journalDir(root string) string { return filepath.Join(root, "bench-attachments") }
