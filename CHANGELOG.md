@@ -10,6 +10,21 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.134 — 2026-11-26
+
+### Upgrade notes
+
+Remote bench access, milestone 2. Remote execution is off until an operator sets a
+stage to `--execution remote`; every existing stage stays `one-shot`.
+
+- Migrations 0139 and 0140 run when the hub deploys.
+- Update the node binary on production nodes before any stage is set to `remote`.
+  After a node binary change, `fleet bench stage set NAME --repin` is needed.
+- While a station is attached to a remote stage, resuming or retiring its attempt
+  closes every session on it, including a workspace admin's Console chat.
+- Sessions that Hermes's own messaging platforms open on a remote-stage station are
+  not gated by `station_in_bench`.
+
 ### Added
 
 - `fleet bench stage add|set --execution one-shot|remote --bench-node NODE`: a
