@@ -76,6 +76,11 @@ export interface ProvisionDeps {
     stationId: string,
     path: string
   ): Promise<{ bytes: Uint8Array; contentType: string } | null>;
+  /**
+   * Let the room's members publish call membership (`call-power-levels.ts`), as the agent. Run
+   * for a bridge room just created; never fails provisioning.
+   */
+  ensureCallPowerLevels?(asUserId: string, roomId: string): Promise<unknown>;
 }
 
 /**
@@ -293,6 +298,16 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
         principalId: s.principalId,
       })
       .onConflictDoNothing();
+
+    // Calls (superdial): members may publish their call membership in a bridge agent's room.
+    if (bridged && deps.ensureCallPowerLevels) {
+      await deps.ensureCallPowerLevels(speaker, roomId).catch((err: unknown) =>
+        log.warn("could not let a new room's members publish call membership", {
+          roomId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   }
 
   if (bridged) {

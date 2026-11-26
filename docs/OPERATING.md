@@ -1628,6 +1628,19 @@ note is posted for it. Messages that queued behind a turn and went to the agent 
 answered once: the last spoken one gets the text and the earlier ones are closed `cancelled`. A
 typed message during a call is answered in the room only.
 
+**Room power levels.** A person can publish their call membership only if the room lets members
+send `org.matrix.msc3401.call.member` (and the newer `org.matrix.msc4143.rtc.member` and
+`org.matrix.msc4143.rtc.slot`) at power level 0. Provisioning sets this on every new bridge room.
+Existing rooms need it once, from the hub's directory on the host:
+
+```sh
+bun run scripts/superdial-call-power-levels.ts          # dry run: lists the rooms it would change
+bun run scripts/superdial-call-power-levels.ts --apply  # writes m.room.power_levels as each room's agent
+```
+
+It is idempotent, changes nothing else in the power levels, and is a real operation on the
+homeserver: run it inside an authorised session, after the dry run.
+
 The `/internal/superdial/*` routes are for machines on the same host or Docker network. Do not
 publish them on the hub's public hostname; their bearers are what hold if they are.
 

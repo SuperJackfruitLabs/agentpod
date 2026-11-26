@@ -77,6 +77,7 @@ import { synthesize } from "../speech";
 import { callsForBridge, type Calls } from "./calls";
 import { CALL_MEMBER_TYPE } from "./call-config";
 import { noteCallTurns } from "./call-turns";
+import { createPowerLevelEnsurer } from "./call-power-levels";
 import type { CallTurnReply } from "./outbound-state";
 
 const log = createLogger("matrix-bridge");
@@ -458,7 +459,14 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     return board?.speakerMxid ?? (await roomAgentUser(roomId, domain));
   };
 
-  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile, readPersona };
+  const ensurePowerLevels = createPowerLevelEnsurer({ homeserverUrl: cfg.homeserverUrl, asToken: cfg.asToken });
+  const provisionDeps = {
+    domain: cfg.domain,
+    client,
+    readWorkspaceFile,
+    readPersona,
+    ensureCallPowerLevels: (asUserId: string, roomId: string) => ensurePowerLevels(asUserId, roomId),
+  };
   const calls = callsForBridge(cfg);
 
   /**
