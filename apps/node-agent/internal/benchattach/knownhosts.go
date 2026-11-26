@@ -12,8 +12,8 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
 )
 
-// The bench's host key is pinned as one managed line in the gateway user's known_hosts, followed
-// by a marker comment that names whose it is:
+// The bench's host key is pinned as one managed line in the known_hosts file ssh names for the bench
+// (SSHKnownHosts), followed by a marker comment that names whose it is:
 //
 //	[100.64.0.1]:2222 ssh-ed25519 AAAA...
 //	# agentpod-bench <stationID> <attemptID>

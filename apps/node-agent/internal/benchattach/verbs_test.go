@@ -54,7 +54,7 @@ func newHandler(t *testing.T, harness string) (*handler, string) {
 	keyPath := benchidentity.KeyPath(root, "st_remote1")
 	_ = os.MkdirAll(filepath.Dir(keyPath), 0o700)
 	_ = os.WriteFile(keyPath, []byte("placeholder"), 0o600)
-	m := Manager{Root: root, KnownHosts: filepath.Join(t.TempDir(), "known_hosts"), Terminal: hermes.HermesTerminal{},
+	m := Manager{Root: root, KnownHosts: fixedKnownHosts(filepath.Join(t.TempDir(), "known_hosts")), Terminal: hermes.HermesTerminal{},
 		Profile: func(string) (string, error) { return profile, nil }}
 	h := NewHandler(&innerHandler{}, HandlerDeps{Root: root, Manager: m, HarnessFor: func(string) (string, error) {
 		if harness == "" {

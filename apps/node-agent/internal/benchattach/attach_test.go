@@ -52,7 +52,7 @@ func newFixture(t *testing.T) *fixture {
 	installPlugin(t, profile, "0.3.0")
 	now := t0
 	f := &fixture{profile: profile, knownHosts: kh, keyPath: keyPath, now: &now}
-	f.m = Manager{Root: root, KnownHosts: kh, Terminal: hermes.HermesTerminal{}, Now: func() time.Time { return *f.now },
+	f.m = Manager{Root: root, KnownHosts: fixedKnownHosts(kh), Terminal: hermes.HermesTerminal{}, Now: func() time.Time { return *f.now },
 		Profile: func(k string) (string, error) {
 			if k != key {
 				return "", errors.New("unknown station")
@@ -472,19 +472,23 @@ func TestSweepRecoversACrashBeforeAnyEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The journal is the first write: a crash right after it leaves only the record.
-	r := record{StationID: station, StationKey: key, AttemptID: "att-1", ProfileDir: f.profile, State: stateAttaching,
-		KeyPath: f.keyPath, Pinned: "[100.64.0.9]:2222 " + hostKey, Prior: prior,
-		Terminal: hermes.SSHTerminal{Host: "100.64.0.9", Port: 2222, User: benchU, KeyPath: f.keyPath, Cwd: workDir}}
-	if err := writeRecord(f.m.Root, r); err != nil {
-		t.Fatal(err)
-	}
-	f.m.Sweep(t0)
-	if f.config(t) != profileConfig || read(t, f.knownHosts) != otherHosts {
-		t.Fatal("recovering an attach that never edited changed the profile")
-	}
-	if _, err := os.Stat(journalPath(f.m.Root, station)); !os.IsNotExist(err) {
-		t.Fatal("the leftover record survived")
+	// The journal is the first write: a crash right after it leaves only the record. A record from
+	// before the journal named its known_hosts asks the resolver instead.
+	for _, journaled := range []string{f.knownHosts, ""} {
+		r := record{StationID: station, StationKey: key, AttemptID: "att-1", ProfileDir: f.profile, State: stateAttaching,
+			User: benchU, Address: addr, KeyPath: f.keyPath, Pinned: "[100.64.0.9]:2222 " + hostKey, Prior: prior,
+			KnownHosts: journaled,
+			Terminal:   hermes.SSHTerminal{Host: "100.64.0.9", Port: 2222, User: benchU, KeyPath: f.keyPath, Cwd: workDir}}
+		if err := writeRecord(f.m.Root, r); err != nil {
+			t.Fatal(err)
+		}
+		f.m.Sweep(t0)
+		if f.config(t) != profileConfig || read(t, f.knownHosts) != otherHosts {
+			t.Fatal("recovering an attach that never edited changed the profile")
+		}
+		if _, err := os.Stat(journalPath(f.m.Root, station)); !os.IsNotExist(err) {
+			t.Fatalf("the leftover record (known_hosts %q) survived", journaled)
+		}
 	}
 }
 

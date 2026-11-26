@@ -4,7 +4,8 @@
 //
 //  1. writes the bench certificate beside the station's bench key (`<key>-cert.pub`, which
 //     OpenSSH loads on its own);
-//  2. pins the bench host key as a managed line in the gateway user's known_hosts;
+//  2. pins the bench host key as a managed line in the known_hosts file ssh itself names for the
+//     bench (`ssh -G`), refusing before any write when ssh cannot name one a pin would hold in;
 //  3. edits the profile's `terminal:` section to Hermes's SSH backend, with `cwd` always set to
 //     the bench's working directory, and records the attachment for the agentpod-live plugin;
 //  4. marks the journal attached.
@@ -76,11 +77,12 @@ type Attachment struct {
 	ValidBefore                         time.Time
 }
 
-// Manager does the work. Root is the node's config directory; KnownHosts is the gateway user's
-// known_hosts; Profile resolves a station key to its Hermes profile directory.
+// Manager does the work. Root is the node's config directory; KnownHosts names the known_hosts file
+// the station's ssh reads for a bench (SSHKnownHosts in production; nil refuses every attach);
+// Profile resolves a station key to its Hermes profile directory.
 type Manager struct {
 	Root       string
-	KnownHosts string
+	KnownHosts KnownHostsResolver
 	Terminal   hermes.TerminalWriter
 	Profile    func(stationKey string) (string, error)
 	// PluginReady confirms the profile's agentpod-live can carry an attachment (nil error).
@@ -141,7 +143,7 @@ func (a Attachment) validate(now time.Time) error {
 
 // Attach points the station's profile at the bench. The same AttemptID again is a renewal: only
 // the certificate (and the plugin's expiry) is rewritten.
-func (m Manager) Attach(_ context.Context, a Attachment) (time.Time, error) {
+func (m Manager) Attach(ctx context.Context, a Attachment) (time.Time, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	now := m.now()
@@ -196,10 +198,24 @@ func (m Manager) Attach(_ context.Context, a Attachment) (time.Time, error) {
 	}
 	line, _ := pinLine(a.Address, a.HostKey)
 	host, port, _, _ := hostPattern(a.Address)
+	// The pin must land where ssh reads it, or Hermes's accept-new trusts whatever answers first:
+	// fail closed, before anything is written.
+	if m.KnownHosts == nil {
+		return time.Time{}, errors.New("benchattach: this node cannot say where ssh reads host keys")
+	}
+	knownHosts, err := m.KnownHosts(ctx, a.User, host, port)
+	if err != nil {
+		return time.Time{}, err
+	}
+	created, dirs, err := knownHostsTarget(knownHosts)
+	if err != nil {
+		return time.Time{}, err
+	}
 	r := record{
 		StationID: a.StationID, StationKey: a.StationKey, AttemptID: a.AttemptID, ProfileDir: profileDir,
 		User: a.User, Address: a.Address, HostKey: a.HostKey, WorkingDirectory: a.WorkingDirectory,
 		ValidBefore: a.ValidBefore, KeyPath: keyPath, Pinned: line, AttachedAt: now,
+		KnownHosts: knownHosts, KnownHostsCreated: created, KnownHostsDirs: dirs,
 		Terminal: hermes.SSHTerminal{Host: host, Port: port, User: a.User, KeyPath: keyPath, Cwd: a.WorkingDirectory},
 	}
 
@@ -225,10 +241,11 @@ func (m Manager) Attach(_ context.Context, a Attachment) (time.Time, error) {
 	}
 	undo = append(undo, func() { _ = os.Remove(benchidentity.CertPath(keyPath)) })
 	// 2. host key pin
-	if err := pin(m.KnownHosts, a.StationID, a.AttemptID, line); err != nil {
+	if err := pin(knownHosts, a.StationID, a.AttemptID, line); err != nil {
+		_ = unpinRecord(r, knownHosts)
 		return fail(fmt.Errorf("benchattach: pinning host key: %w", err))
 	}
-	undo = append(undo, func() { _ = unpin(m.KnownHosts, a.StationID, a.AttemptID, line) })
+	undo = append(undo, func() { _ = unpinRecord(r, knownHosts) })
 	// 3. terminal section, then the plugin's state
 	wrote, err := m.Terminal.SetSSH(profileDir, r.Terminal)
 	if err != nil {
@@ -324,7 +341,17 @@ func (m Manager) detach(r record) (string, error) {
 	if err := m.Terminal.RemoveState(r.ProfileDir); err != nil && !profileGone(r.ProfileDir) {
 		return "", err
 	}
-	if err := unpin(m.KnownHosts, r.StationID, r.AttemptID, r.Pinned); err != nil {
+	knownHosts := r.KnownHosts
+	if knownHosts == "" {
+		host, port, _, err := hostPattern(r.Address)
+		if err != nil || m.KnownHosts == nil {
+			return "", fmt.Errorf("benchattach: the journal does not say which known_hosts holds the pin")
+		}
+		if knownHosts, err = m.KnownHosts(context.Background(), r.User, host, port); err != nil {
+			return "", err
+		}
+	}
+	if err := unpinRecord(r, knownHosts); err != nil {
 		return "", fmt.Errorf("benchattach: unpinning host key: %w", err)
 	}
 	if err := os.Remove(benchidentity.CertPath(r.KeyPath)); err != nil && !os.IsNotExist(err) {

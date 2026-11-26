@@ -266,11 +266,12 @@ func runCmd() {
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
 	// bench.identity.ensure and bench.remote.attach|detach|status: a Hermes station works in a
 	// remote bench through the bench's SSH door. The key, certificate and journal live in the
-	// config directory beside the git identities; the host key is pinned in this user's
-	// known_hosts, which is the gateway's own. Neither verb restarts the gateway.
+	// config directory beside the git identities; the host key is pinned in the known_hosts file
+	// ssh itself names for the bench (this node runs the station's ACP sessions as its own user).
+	// Neither verb restarts the gateway.
 	benchAttach := benchattach.Manager{
 		Root:       gitIdentityRoot,
-		KnownHosts: knownHostsPath(),
+		KnownHosts: benchattach.SSHKnownHosts,
 		Terminal:   hermes.HermesTerminal{},
 		Profile:    resolver.Workspace,
 	}
@@ -521,13 +522,4 @@ func gatherHealthReports(reg *descriptor.Registry) []gateway.HealthReport {
 		})
 	}
 	return reports
-}
-
-// knownHostsPath is this user's known_hosts: the node runs as the user its Hermes gateway runs as.
-func knownHostsPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(filepath.Dir(config.DefaultPath()), "known_hosts")
-	}
-	return filepath.Join(home, ".ssh", "known_hosts")
 }

@@ -61,6 +61,10 @@ Switching a stage to `remote` clears its worker and worker arguments. Switching 
    - The bench host's node asks SuperBench for a certificate bound to the card's lease.
    - The station's node pins the bench's host key and points the station's terminal at the bench.
      The terminal's working directory is the card's workspace root.
+   - The pin goes in the `known_hosts` file that ssh itself names for the bench (`ssh -G`, as the
+     node's user), so it holds whatever `$HOME` or the user's ssh configuration say. When ssh names
+     no file a pin can live in (`none`, `/dev/null`, a symlink, or a `HostKeyAlias` for the bench),
+     the attach is refused `unavailable` and nothing is written.
    - No certificate, private key or lease token is stored by the hub.
 2. **The turn.**
    - The hub opens a fresh ACP session after the attach, with the workspace root as its working
@@ -75,8 +79,8 @@ Switching a stage to `remote` clears its worker and worker arguments. Switching 
    - A tree with uncommitted or untracked files is refused. The agent is attached again in a fresh
      session and asked, twice, to commit or remove them, with SuperBench's own message. After that
      the run fails (`remote.dirty`).
-4. **Detach.** The station's terminal configuration goes back to the bytes it had before the
-   attach.
+4. **Detach.** The station's terminal configuration and `known_hosts` go back to the bytes they had
+   before the attach. A `known_hosts` (and `~/.ssh`) that the attach created is removed again.
 
 The turn's time limit is the stage task's timeout, 30 minutes. It counts from the first turn,
 across hub restarts and dirty-tree retries. Work longer than that is cut off and the run is

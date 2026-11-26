@@ -16,22 +16,29 @@ import (
 // record is one station's live attachment: everything detach needs to undo it without asking
 // anyone, including after a node restart and after the station itself is gone.
 type record struct {
-	Version          int                `json:"version"`
-	State            string             `json:"state"`
-	StationID        string             `json:"station_id"`
-	StationKey       string             `json:"station_key"`
-	AttemptID        string             `json:"attempt_id"`
-	ProfileDir       string             `json:"profile_dir"`
-	User             string             `json:"user"`
-	Address          string             `json:"address"`
-	HostKey          string             `json:"host_key"`
-	WorkingDirectory string             `json:"working_directory"`
-	ValidBefore      time.Time          `json:"valid_before"`
-	KeyPath          string             `json:"key_path"`
-	Pinned           string             `json:"pinned"`
-	Terminal         hermes.SSHTerminal `json:"terminal"`
-	Prior            map[string]any     `json:"prior"`
-	AttachedAt       time.Time          `json:"attached_at"`
+	Version          int       `json:"version"`
+	State            string    `json:"state"`
+	StationID        string    `json:"station_id"`
+	StationKey       string    `json:"station_key"`
+	AttemptID        string    `json:"attempt_id"`
+	ProfileDir       string    `json:"profile_dir"`
+	User             string    `json:"user"`
+	Address          string    `json:"address"`
+	HostKey          string    `json:"host_key"`
+	WorkingDirectory string    `json:"working_directory"`
+	ValidBefore      time.Time `json:"valid_before"`
+	KeyPath          string    `json:"key_path"`
+	Pinned           string    `json:"pinned"`
+	// KnownHosts is the file the pin went in, as ssh named it at attach; detach unpins that file.
+	// Empty only in a record from before it was journaled, whose detach asks ssh again.
+	KnownHosts string `json:"known_hosts,omitempty"`
+	// KnownHostsCreated: the file did not exist before the attach, so detach removes it once empty,
+	// and KnownHostsDirs, the directories attach created above it (outermost first), once empty.
+	KnownHostsCreated bool               `json:"known_hosts_created,omitempty"`
+	KnownHostsDirs    []string           `json:"known_hosts_dirs,omitempty"`
+	Terminal          hermes.SSHTerminal `json:"terminal"`
+	Prior             map[string]any     `json:"prior"`
+	AttachedAt        time.Time          `json:"attached_at"`
 }
 
 // Journal states. A record from before states existed has none and is attached.

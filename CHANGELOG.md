@@ -61,9 +61,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 - Node verbs `bench.identity.ensure` and `bench.remote.attach|detach|status`,
   advertised as `bench.remote.attach`: a Hermes station gets its own bench SSH
   key (private half on the node only), and attach writes the bench certificate
-  beside it, pins the bench host key in the gateway user's `known_hosts` and
+  beside it, pins the bench host key in the `known_hosts` file ssh itself names
+  for the bench (`ssh -G`; refused `unavailable`, with nothing written, when
+  that is `none`, `/dev/null`, a symlink or behind a `HostKeyAlias`) and
   points the profile's `terminal:` section at the bench, `cwd` included.
-  Detach restores `config.yaml` and `known_hosts` byte for byte, or leaves a
+  Detach restores `config.yaml` and `known_hosts` byte for byte (a
+  `known_hosts` the attach created is removed again), or leaves a
   terminal section someone else has since changed (`terminal_changed`). Attach
   refuses a profile that would copy credential files to the bench, or one
   without `agentpod-live` 0.3.0 or later enabled (`plugin_missing`). It
