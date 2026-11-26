@@ -110,6 +110,8 @@ const seen = {
   failed: [] as string[],
   /** The agent's node's refusal of the next attach, when set. */
   attachRefusal: undefined as Record<string, unknown> | undefined,
+  /** Runs when a detach reaches the agent's node, before it answers. */
+  onDetach: undefined as (() => Promise<void>) | undefined,
 };
 let attempt: RetainedCheckpointAttempt;
 let completionFor: Awaited<ReturnType<typeof checkpointNodeObservation>>;
@@ -181,11 +183,16 @@ function agentNodeAnswers() {
     seen.agent.push({ verb: message.verb, params });
     // A new certificate reached the agent's node after the fence: its work lands again.
     if (message.verb === "bench.remote.attach" && seen.reissued) seen.fenced = false;
-    const data = message.verb === "bench.identity.ensure" ? { publicKey: PUBLIC_KEY }
-      : message.verb === "bench.remote.attach" ? seen.attachRefusal ?? { state: "attached", validBefore: "2099-01-01T00:00:00Z" }
-        : message.verb === "bench.remote.status" ? { attemptId: attempt.row.attemptId, validBefore: "2099-01-01T00:00:00Z" }
-          : message.verb === "bench.remote.detach" && seen.detach === "detached" ? { state: "detached" } : undefined;
-    handleNodeMessage(agentNode, data ? { type: "res", id: message.id, ok: true, data } : { type: "res", id: message.id, ok: false, error: "unknown verb" });
+    const answer = () => {
+      const data = message.verb === "bench.identity.ensure" ? { publicKey: PUBLIC_KEY }
+        : message.verb === "bench.remote.attach" ? seen.attachRefusal ?? { state: "attached", validBefore: "2099-01-01T00:00:00Z" }
+          : message.verb === "bench.remote.status" ? { attemptId: attempt.row.attemptId, validBefore: "2099-01-01T00:00:00Z" }
+            : message.verb === "bench.remote.detach" && seen.detach === "detached" ? { state: "detached" } : undefined;
+      handleNodeMessage(agentNode, data ? { type: "res", id: message.id, ok: true, data } : { type: "res", id: message.id, ok: false, error: "unknown verb" });
+    };
+    const onDetach = message.verb === "bench.remote.detach" ? seen.onDetach : undefined;
+    if (onDetach) void onDetach().finally(answer);
+    else answer();
   });
 }
 
@@ -712,10 +719,22 @@ test("an operator's retirement of a remote attempt stops its agent and detaches 
     expect(await early.json()).toMatchObject({ code: "in_progress" });
     expect(seen.agent.filter((c) => c.verb === "bench.remote.detach")).toHaveLength(detaches);
     expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
-    const response = await admin.request(`/checkpoint/attempts/${attempt.row.attemptId}/settle`, { method: "POST",
-      headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: attempt.row.attemptId,
-        evidence: "Checked the bench host's journal and the board: the agent's run is abandoned." }) });
+    // The settlement is audited before the agent is stopped: the detach waits on the agent's node and
+    // can fail, and the operator's action must already be on record when it does.
+    const auditedAtDetach: number[] = [];
+    seen.onDetach = async () => {
+      const [row] = await rawSql`SELECT count(*)::int AS n FROM admin_audit_log WHERE tenant_id = ${tenantId}
+        AND action = 'checkpoint_attempt_settle' AND target_resource_id = ${attempt.row.attemptId}`;
+      auditedAtDetach.push(Number(row?.n));
+    };
+    let response: Response;
+    try {
+      response = await admin.request(`/checkpoint/attempts/${attempt.row.attemptId}/settle`, { method: "POST",
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: attempt.row.attemptId,
+          evidence: "Checked the bench host's journal and the board: the agent's run is abandoned." }) });
+    } finally { seen.onDetach = undefined; }
     expect(response.status).toBe(200);
+    expect(auditedAtDetach).toEqual([1]);
     // Its live turn is cancelled (the session ended), and the station detached and recorded so, in the same request.
     expect(seen.ended.length).toBe(ended + 1);
     expect(seen.agent.filter((c) => c.verb === "bench.remote.detach")).toHaveLength(detaches + 1);

@@ -70,12 +70,14 @@ export const adminCheckpointAttemptsRouter = new Hono()
     const userId = c.get("user").id;
     const settled = await retireCheckpointAttempt(attempt, { reason: "operator", by: userId, evidence });
     if (!settled) return c.json({ error: "the attempt moved on while it was being settled; read it again" }, 409);
-    const retired = await readCheckpointAttempt(tenantId, attemptId).catch(() => undefined);
-    if (retired) await endRemoteWork(retired, { request: nodeRequest }, "An operator settled the bench stage's attempt.");
+    // Audited the moment the retirement is recorded, before stopping the agent: that waits on its
+    // node and can throw, and a settlement must never stand unaudited.
     await logAdminAction({ tenantId, adminUserId: userId, action: "checkpoint_attempt_settle",
       targetResourceId: attemptId, targetResourceType: "checkpoint_attempt",
       details: { from: attempt.row.phase, boardId: attempt.row.boardId, runId: attempt.row.runId,
         retirement: canonicalCheckpoint({ reason: "operator", evidence }) } });
+    const retired = await readCheckpointAttempt(tenantId, attemptId).catch(() => undefined);
+    if (retired) await endRemoteWork(retired, { request: nodeRequest }, "An operator settled the bench stage's attempt.");
     return c.json({ attemptId, from: attempt.row.phase, phase: "retired" });
   })
   .post("/:attemptId/detached", zValidator("json", settleSchema), async (c) => {
@@ -87,6 +89,7 @@ export const adminCheckpointAttemptsRouter = new Hono()
     if (!attempt) return c.json({ error: "no such checkpoint attempt in this workspace" }, 404);
     const outcome = await confirmRemoteDetachByOperator(attempt);
     if (outcome !== "confirmed") return c.json({ error: DETACH_REFUSALS[outcome], code: outcome }, 409);
+    // Audited straight after the record, with nothing between that can wait or throw.
     const userId = c.get("user").id;
     await logAdminAction({ tenantId, adminUserId: userId, action: "checkpoint_attempt_detach_confirm",
       targetResourceId: attemptId, targetResourceType: "checkpoint_attempt",

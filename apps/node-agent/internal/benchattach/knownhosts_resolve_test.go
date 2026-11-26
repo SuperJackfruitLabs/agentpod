@@ -1,8 +1,10 @@
 package benchattach
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,20 @@ func TestKnownHostsFromConfig(t *testing.T) {
 		{"an unexpanded home", "userknownhostsfile ~/.ssh/known_hosts\n", ""},
 		{"no file at all", "user b-x\nport 2222\n", ""},
 		{"a host key alias", "hostkeyalias bench\nuserknownhostsfile /home/agent/.ssh/known_hosts\n", ""},
+		// ssh -G prints each path after one space and quotes none (OpenSSH 9.9 prints
+		// `UserKnownHostsFile="/tmp/a b/known_hosts" /tmp/c` as `userknownhostsfile /tmp/a b/known_hosts /tmp/c`):
+		// a path with a space cannot be read one way only, and its first word is a file ssh never reads.
+		{"a path with a space", "userknownhostsfile /home/agent/my files/known_hosts /home/agent/.ssh/known_hosts2\n", ""},
+		{"a path with a space, alone", "userknownhostsfile /home/agent/my files/known_hosts\n", ""},
+		{"a double-quoted path", "userknownhostsfile \"/home/agent/my files/known_hosts\"\n", ""},
+		{"a single-quoted path", "userknownhostsfile '/home/agent/.ssh/known_hosts'\n", ""},
+		{"a quote inside a path", "userknownhostsfile /home/agent/.ssh/known\"hosts\n", ""},
+		{"a tab between paths", "userknownhostsfile /home/agent/.ssh/known_hosts\t/srv/hosts\n", ""},
+		{"two spaces between paths", "userknownhostsfile /home/agent/.ssh/known_hosts  /srv/hosts\n", ""},
+		{"a later path that is not absolute", "userknownhostsfile /home/agent/.ssh/known_hosts relative\n", ""},
+		{"none among others", "userknownhostsfile none /srv/hosts\n", ""},
+		{"a carriage return is not a path", "userknownhostsfile /srv/hosts\r\n", "/srv/hosts"},
+		{"a single clean path", "userknownhostsfile /home/agent/.ssh/known_hosts\n", "/home/agent/.ssh/known_hosts"},
 	} {
 		got, err := knownHostsFromConfig([]byte(tc.out))
 		if tc.want == "" {
@@ -171,5 +187,61 @@ func TestDetachUnpinsTheJournaledKnownHosts(t *testing.T) {
 	}
 	if strings.Contains(read(t, f.knownHosts), markerPrefix) {
 		t.Error("a managed line survived")
+	}
+}
+
+// Attach logs which known_hosts it pinned and whether it created it, and nothing of the key.
+func TestAttachLogsTheKnownHostsItPinned(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	f := newFixture(t)
+	kh := filepath.Join(t.TempDir(), ".ssh", "known_hosts")
+	f.m.KnownHosts = fixedKnownHosts(kh)
+	if _, err := f.m.Attach(context.Background(), attachment("att-1", certA, 30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "pinned the bench host key for attempt att-1 in "+kh+" (created true)") {
+		t.Errorf("log = %q, want the pinned file and that attach created it", got)
+	}
+	if strings.Contains(got, "AAAA") {
+		t.Errorf("log carries key material: %q", got)
+	}
+}
+
+// A node user whose home contains whitespace is refused before ssh is asked: its known_hosts
+// path would print as several words.
+func TestSSHKnownHostsRefusesAHomeWithWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		homes []string
+		ok    bool
+	}{
+		{"a normal home", []string{"/home/agent"}, true},
+		{"$HOME and passwd agree", []string{"/home/agent", "/home/agent"}, true},
+		{"a spaced home", []string{"/home/my agent"}, false},
+		{"a tab in the home", []string{"/home/my\tagent"}, false},
+		{"passwd's home is spaced", []string{"/home/agent", "/Users/my agent"}, false},
+	} {
+		if err := homesWithoutWhitespace(tc.homes); (err == nil) != tc.ok {
+			t.Errorf("%s: err = %v, want ok %t", tc.name, err, tc.ok)
+		}
+	}
+	// SSHKnownHosts itself refuses, and never runs ssh.
+	bin := t.TempDir()
+	ran := filepath.Join(t.TempDir(), "ran")
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\n: > "+ran+"\nprintf 'userknownhostsfile /home/my agent/.ssh/known_hosts\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	prior := nodeHomes
+	nodeHomes = func() []string { return []string{"/home/my agent"} }
+	t.Cleanup(func() { nodeHomes = prior })
+	if got, err := SSHKnownHosts(context.Background(), benchU, "100.64.0.9", 2222); err == nil {
+		t.Errorf("a spaced home answered %q", got)
+	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Error("ssh was asked despite a spaced home")
 	}
 }
