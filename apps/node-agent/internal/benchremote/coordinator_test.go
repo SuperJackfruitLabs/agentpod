@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -376,8 +377,8 @@ func TestCancelStopsAndReleases(t *testing.T) {
 	if _, err := tr.c.Cancel(context.Background(), tr.spec); err != nil {
 		wantCode(t, err, "stale_owner")
 	}
-	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint", "stop", "release"}) || tr.leased {
-		t.Fatal("cancel is a checkpoint, a stop, then a release", got)
+	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"status", "checkpoint", "stop", "release"}) || tr.leased {
+		t.Fatal("cancel reads the lease, checkpoints, stops, then releases", got)
 	}
 	tr.superseded.Store(false)
 	_, err := tr.c.Attach(context.Background(), tr.spec, binding, key)
@@ -402,7 +403,7 @@ func TestCancelCheckpointsACleanTreeKeepingTheAgentsCommits(t *testing.T) {
 	if _, err := tr.c.Cancel(context.Background(), tr.spec); err != nil {
 		wantCode(t, err, "stale_owner")
 	}
-	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint", "stop", "release"}) || tr.leased || tr.committed {
+	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"status", "checkpoint", "stop", "release"}) || tr.leased || tr.committed {
 		t.Fatal("the agent's commits were not checkpointed before the release", got, tr.leased)
 	}
 	_, record, _ := tr.journal(t)
@@ -425,7 +426,7 @@ func TestCancelHoldsADirtyTreeForAnOperator(t *testing.T) {
 		if err != nil || !status.LeaseHeld || !strings.HasPrefix(status.Message, "workspace has uncommitted or untracked files") {
 			t.Fatal("a dirty tree is not reported held", status, err)
 		}
-		if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint"}) || !tr.leased || tr.execution != "" {
+		if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"status", "checkpoint"}) || !tr.leased || tr.execution != "" {
 			t.Fatal("a dirty tree was released, stopped or left unfenced", got)
 		}
 		// Asked again while still dirty: checkpointed again (never replayed), never released.
@@ -433,7 +434,7 @@ func TestCancelHoldsADirtyTreeForAnOperator(t *testing.T) {
 		if status, err = tr.c.Status(context.Background(), tr.spec); err != nil || !status.LeaseHeld {
 			t.Fatal("a held dirty tree stopped saying so", status, err)
 		}
-		if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint"}) || !tr.leased {
+		if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"status", "checkpoint"}) || !tr.leased {
 			t.Fatal("a still dirty tree was released", got)
 		}
 		if operator == "cleans the tree" {
@@ -447,6 +448,46 @@ func TestCancelHoldsADirtyTreeForAnOperator(t *testing.T) {
 		_, record, _ := tr.journal(t)
 		if tr.leased || record["release"] != "done" || record["phase"] != "refused" {
 			t.Fatal("once the operator "+operator+", the record did not end released", record["release"], tr.leased)
+		}
+	}
+}
+
+// A stopped lease is never checkpointed: benchd would refuse and leave the checkpoint pending for good,
+// and the operator's renew_admin refuses a pending checkpoint. An operator who stopped a held dirty bench
+// (stop_admin) and the record's own earlier stop are both read from the lease.
+func TestAStoppedLeaseIsNeverCheckpointed(t *testing.T) {
+	for _, who := range []string{"an operator", "the record"} {
+		tr := newTrial(t)
+		binding := tr.prepare(t)
+		tr.attach(t, binding, testKey(1))
+		tr.superseded.Store(true)
+		if who == "an operator" {
+			tr.dirty = true
+			if _, err := tr.c.Cancel(context.Background(), tr.spec); err != nil {
+				t.Fatal(err)
+			}
+			tr.mu.Lock()
+			tr.stopped, tr.dirty = true, false // stop_admin, then the fix
+			tr.mu.Unlock()
+		} else {
+			// The first checkpoint is refused for another reason, so the record stops its lease and tries a
+			// release, which benchd refuses: the agent's commits were never checkpointed.
+			tr.committed, tr.refuseCheckpoint = true, true
+			if _, err := tr.c.Cancel(context.Background(), tr.spec); err != nil {
+				t.Fatal(err)
+			}
+			tr.refuseCheckpoint = false
+			tr.c.launch().Forget(context.Background(), tr.spec, "retire_checkpoint") // a build that did not keep the reply
+		}
+		if !tr.stopped || !tr.leased {
+			t.Fatal(who, "fixture: the lease should be stopped and still held")
+		}
+		n := len(tr.sequence(0))
+		if _, err := tr.c.Status(context.Background(), tr.spec); err != nil {
+			wantCode(t, err, "stale_owner")
+		}
+		if got := tr.sequence(n); slices.Contains(got, "checkpoint") || tr.pending {
+			t.Fatal(who, "stopped the lease, and it was checkpointed", got)
 		}
 	}
 }

@@ -31,20 +31,22 @@ const (
 // lease's own token, and opens (or keeps) the lease's remote execution, as
 // benchd's grant does. A checkpoint, stop or release fences it.
 type fakeBenchd struct {
-	mu        sync.Mutex
-	t         *testing.T
-	key       string
-	holder    string
-	leased    bool
-	stopped   bool
-	execution string // the lease's live remote execution, "" when none
-	nextExec  int
-	dirty     bool // a checkpoint (and a release) finds uncommitted files
-	committed bool // the agent committed since the last checkpoint: a release refuses until one is taken
-	ops       []string
-	keys      []string // public keys benchd was asked to sign
-	issued    []byte   // the corpus's issued-certificate reply
-	receipts  map[string][]byte
+	mu               sync.Mutex
+	t                *testing.T
+	key              string
+	holder           string
+	leased           bool
+	stopped          bool
+	execution        string // the lease's live remote execution, "" when none
+	nextExec         int
+	dirty            bool // a checkpoint (and a release) finds uncommitted files
+	committed        bool // the agent committed since the last checkpoint: a release refuses until one is taken
+	pending          bool // a checkpoint was refused part way and left pending
+	refuseCheckpoint bool // every checkpoint is refused, for a reason that is not a dirty tree
+	ops              []string
+	keys             []string // public keys benchd was asked to sign
+	issued           []byte   // the corpus's issued-certificate reply
+	receipts         map[string][]byte
 }
 
 func newFakeBenchd(t *testing.T, key string) (*fakeBenchd, *benchworkspace.Client) {
@@ -122,6 +124,9 @@ func (f *fakeBenchd) workspace(held bool, generation string, commits ...string) 
 		Checkpoint: &benchworkspace.Checkpoint{GenerationID: generation, ManifestSHA256: strings.Repeat("c", 64), Members: []benchworkspace.Commit{{Name: "a", Commit: commits[0]}, {Name: "b", Commit: commits[1]}}, Seal: commits[0]}}
 	if held {
 		w.Lease = &benchworkspace.LeaseSummary{Holder: f.holder, Mode: "cooperative", StopRequested: f.stopped}
+	}
+	if f.pending {
+		w.Pending = &benchworkspace.Pending{GenerationID: strings.Repeat("5", 32), ManifestSHA256: strings.Repeat("d", 64), Members: w.Checkpoint.Members}
 	}
 	return w
 }
@@ -228,6 +233,16 @@ func (f *fakeBenchd) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.execution = "" // benchd fences the remote execution before it looks
+		if op == "checkpoint" && f.refuseCheckpoint {
+			reply(w, 409, envelope(op, "", false, nil, "conflict", "workspace state conflicts with this operation"))
+			return
+		}
+		if op == "checkpoint" && f.stopped {
+			// As benchd does: a stopped lease's payload Git is refused, and the checkpoint is left pending.
+			f.pending = true
+			reply(w, 500, envelope(op, "", false, nil, "operation_failed", "registered payload Git refused"))
+			return
+		}
 		if op == "checkpoint" && f.dirty {
 			reply(w, 409, envelope(op, "", false, nil, "conflict", "workspace has uncommitted or untracked files; commit or remove them before checkpoint or release: a/notes.txt"))
 			return

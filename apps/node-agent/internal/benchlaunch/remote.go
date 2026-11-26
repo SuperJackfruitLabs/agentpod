@@ -103,6 +103,17 @@ func (c Coordinator) saveRemote(ctx context.Context, spec benchdispatch.SourceSp
 	if !c.Remote || r.Phase != phaseRefused {
 		return false, nil
 	}
+	// A stopped lease can never checkpoint: benchd refuses the payload's Git and leaves the checkpoint
+	// pending, which renew_admin then refuses. So the lease is read first, and a lease that is stopped
+	// (by this record's own earlier stop, or an operator's stop_admin on a held bench), not ours, or
+	// already pending goes straight to its release. A status that cannot be read is asked again.
+	w := c.bench(ctx, spec)
+	if w == nil {
+		return false, benchdispatch.ErrPending
+	}
+	if w.Lease == nil || w.Lease.Holder != spec.Holder || w.Lease.StopRequested || w.Pending != nil {
+		return false, nil
+	}
 	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "checkpoint", Key: spec.BenchKey, LeaseToken: token}
 	reply, err := c.ordinary(ctx, spec, "retire_checkpoint", request, true)
 	if err != nil {
