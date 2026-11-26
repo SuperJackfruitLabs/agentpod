@@ -527,6 +527,14 @@ lets the change make it disappear; it is resolved, with evidence, as follows.
   `GET /api/admin/checkpoint/attempts` and
   `POST /api/admin/checkpoint/attempts/:attemptId/settle` with
   `{"confirm": "<attempt id>", "evidence": "…"}`.
+- **An owner or admin confirms a remote attempt's detach by hand.** An ended remote
+  attempt keeps its station busy until the station's node confirms the detach; a node
+  that refuses it every time never does. Once the operator has restored the station's
+  terminal on its node, `fleet bridge checkpoint-detached ATTEMPT --evidence "…"`
+  (`POST /api/admin/checkpoint/attempts/:attemptId/detached`, same body) records the
+  detach as confirmed, which frees the station. It asks no node, is audited
+  (`checkpoint_attempt_detach_confirm`), and is refused 409 while the attempt is in
+  progress (`in_progress`) or when its station is not attached (`not_attached`).
 - **Nothing is deleted.** `retired` and `reported` are terminal, a retirement can
   never change, and every evidence cell the attempt already held stays as it was.
 

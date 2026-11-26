@@ -2674,12 +2674,12 @@ fleet settings speech test
 The board roster: which agent claims from which board.
 
 ```text
-fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle> ...
+fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle|checkpoint-detached> ...
 ```
 
 This table is the gate on an agent doing anything at all: a staffed, online agent claims no card until a row points it at a board. No verb here prints a credential. See [Working a board](/use/boards/).
 
-Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work), [`checkpoint-attempts`](#fleet-bridge-checkpoint-attempts), [`checkpoint-settle`](#fleet-bridge-checkpoint-settle).
+Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work), [`checkpoint-attempts`](#fleet-bridge-checkpoint-attempts), [`checkpoint-settle`](#fleet-bridge-checkpoint-settle), [`checkpoint-detached`](#fleet-bridge-checkpoint-detached).
 
 `fleet bridge -h` prints:
 
@@ -2697,6 +2697,7 @@ usage:
   fleet bridge related-work BOARD on|off
   fleet bridge checkpoint-attempts
   fleet bridge checkpoint-settle ATTEMPT --evidence TEXT
+  fleet bridge checkpoint-detached ATTEMPT --evidence TEXT
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2872,6 +2873,30 @@ For an attempt the hub cannot retire by itself. Deletes nothing: the attempt end
 
 ```sh
 fleet bridge checkpoint-settle attempt_0123 --evidence "node journal shows the record cancelled; no bench lease held"
+```
+
+### fleet bridge checkpoint-detached
+
+Record a remote bench stage's station as detached, after restoring it by hand.
+
+```text
+fleet bridge checkpoint-detached ATTEMPT --evidence TEXT
+```
+
+For an ended remote attempt whose station the agent's node will not detach (the detach sweep logs `remote.detach.invalid` on every pass), which keeps the station busy. First restore the station's own terminal on its node by hand. The hub then records the detach as confirmed and the station takes work again. It asks no node, changes nothing else, and is audited with your evidence. Refused (409) while the attempt is still in progress (`in_progress`; settle it first), and for a station already detached, or never attached as with a one-shot attempt (`not_attached`). Without an ATTEMPT, or with evidence under 20 characters, exits 2 without calling the hub.
+
+| Argument | Meaning |
+|---|---|
+| `ATTEMPT` | an ended remote attempt's `attempt_` id |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--evidence TEXT` | string | — | What you checked on the station's node, and how its terminal was restored. **Required.** |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bridge checkpoint-detached attempt_0123 --evidence "restored the profile's terminal by hand; no bench journal left"
 ```
 
 ## fleet bench

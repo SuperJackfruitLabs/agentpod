@@ -33,7 +33,8 @@ const BridgeUsage = `usage:
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
   fleet bridge checkpoint-attempts
-  fleet bridge checkpoint-settle ATTEMPT --evidence TEXT`
+  fleet bridge checkpoint-settle ATTEMPT --evidence TEXT
+  fleet bridge checkpoint-detached ATTEMPT --evidence TEXT`
 
 const BenchUsage = `usage:
   fleet bench stage list

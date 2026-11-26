@@ -108,4 +108,5 @@ export type AdminAction =
   | "node_telemetry_update"
   | "node_remove"
   | "acp_session_end"
-  | "checkpoint_attempt_settle";
+  | "checkpoint_attempt_settle"
+  | "checkpoint_attempt_detach_confirm";

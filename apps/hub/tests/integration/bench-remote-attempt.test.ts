@@ -654,6 +654,46 @@ test("detach sweep retries until the agent's node answers", async () => {
   expect(asked()).toBe(2);
 });
 
+test("an operator confirms a detach the agent's node keeps refusing, which frees the station", async () => {
+  // The first card settled, and say its station's node refuses every detach: the sweep never frees it.
+  const settled = await stored();
+  const state = parseRemoteState(settled.remote);
+  if (!state) throw new Error("no remote state");
+  await rawSql`UPDATE checkpoint_dispatches SET remote = ${canonicalCheckpoint({ ...state, detached: false })}
+    WHERE tenant_id = ${tenantId} AND attempt_id = ${attempt.row.attemptId}`;
+  expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
+  const admin = new Hono().use("*", async (c, next) => {
+    c.set("user", { id: "usr_admin" + suffix, authType: "org_plane", tenantId });
+    await next();
+  }).route("/checkpoint/attempts", adminCheckpointAttemptsRouter);
+  const evidence = "Restored the station's terminal on its node by hand; its journal is gone.";
+  const confirmDetach = (id: string, confirm = id) => admin.request(`/checkpoint/attempts/${id}/detached`, { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm, evidence }) });
+  const asked = seen.agent.length;
+
+  // Refused for a confirmation that names another attempt (one in progress: the next test).
+  expect((await confirmDetach(attempt.row.attemptId, "attempt_other")).status).toBe(400);
+  expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
+
+  // Confirmed: recorded, the station is free, audited with the evidence, and no node was asked anything.
+  const response = await confirmDetach(attempt.row.attemptId);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ attemptId: attempt.row.attemptId, phase: "reported", detached: true });
+  expect(parseRemoteState((await stored()).remote)).toMatchObject({ detached: true });
+  expect((await stored()).phase).toBe("reported");
+  expect(await stationBenchBusy(tenantId, stationId)).toBe(false);
+  expect(seen.agent.length).toBe(asked);
+  const audits = await rawSql`SELECT admin_user_id, details FROM admin_audit_log
+    WHERE tenant_id = ${tenantId} AND action = 'checkpoint_attempt_detach_confirm' AND target_resource_id = ${attempt.row.attemptId}`;
+  expect(audits).toHaveLength(1);
+  expect(audits[0]?.admin_user_id).toBe("usr_admin" + suffix);
+  expect(JSON.stringify(audits[0]?.details)).toContain(evidence);
+  // Nothing left to confirm.
+  const again = await confirmDetach(attempt.row.attemptId);
+  expect(again.status).toBe(409);
+  expect(await again.json()).toMatchObject({ code: "not_attached" });
+});
+
 test("an operator's retirement of a remote attempt stops its agent and detaches the station at once", async () => {
   await onRun("r6", async () => {
     const client = await checkpointAgentClient(profile);
@@ -664,6 +704,14 @@ test("an operator's retirement of a remote attempt stops its agent and detaches 
       c.set("user", { id: "usr_admin" + suffix, authType: "org_plane", tenantId });
       await next();
     }).route("/checkpoint/attempts", adminCheckpointAttemptsRouter);
+    // Its detach cannot be confirmed by hand while it is in progress: it detaches on its own way out.
+    const early = await admin.request(`/checkpoint/attempts/${attempt.row.attemptId}/detached`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: attempt.row.attemptId,
+        evidence: "Restored the station's terminal on its node by hand." }) });
+    expect(early.status).toBe(409);
+    expect(await early.json()).toMatchObject({ code: "in_progress" });
+    expect(seen.agent.filter((c) => c.verb === "bench.remote.detach")).toHaveLength(detaches);
+    expect(await stationBenchBusy(tenantId, stationId)).toBe(true);
     const response = await admin.request(`/checkpoint/attempts/${attempt.row.attemptId}/settle`, { method: "POST",
       headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: attempt.row.attemptId,
         evidence: "Checked the bench host's journal and the board: the agent's run is abandoned." }) });

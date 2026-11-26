@@ -73,6 +73,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   journals before its first edit, so an attach a crash left half done is undone
   by the sweep, which also detaches five minutes after a certificate lapses.
   Neither verb restarts the gateway.
+- `fleet bridge checkpoint-detached ATTEMPT --evidence TEXT` (`POST
+  /api/admin/checkpoint/attempts/:id/detached`, workspace owners and admins):
+  the escape for a detach the station's node refuses for ever, which keeps an
+  ended remote attempt's station busy. After restoring the station's terminal
+  by hand, the operator records the detach as confirmed; the hub asks no node,
+  audits the evidence, and refuses an attempt still in progress.
 - `agentpod-live` 0.3.0: while its profile is attached to a remote bench, the
   plugin rewrites replace-mode `patch` calls into the equivalent V4A patch (the
   only form ACP edit approval can preview remotely), blocks `replace_all` with

@@ -28,6 +28,7 @@ func TestAdminVerbsUseTheHubRoutes(t *testing.T) {
 		{"bridge rm", []string{"bridge", "rm", "k"}, "DELETE", "/api/admin/bridge/agents/k"},
 		{"bridge checkpoint-attempts", []string{"bridge", "checkpoint-attempts"}, "GET", "/api/admin/checkpoint/attempts"},
 		{"bridge checkpoint-settle", []string{"bridge", "checkpoint-settle", "attempt_1", "--evidence", "node journal shows the record cancelled"}, "POST", "/api/admin/checkpoint/attempts/attempt_1/settle"},
+		{"bridge checkpoint-detached", []string{"bridge", "checkpoint-detached", "attempt_1", "--evidence", "restored the terminal on the node by hand"}, "POST", "/api/admin/checkpoint/attempts/attempt_1/detached"},
 
 		// bench stages and the doctor
 		{"bench stage list", []string{"bench", "stage", "list"}, "GET", "/api/admin/bench/stages"},
@@ -392,6 +393,10 @@ func TestBridgeCheckpointSettleRefusesWithoutEvidence(t *testing.T) {
 		"no attempt":     {"bridge", "checkpoint-settle"},
 		"no evidence":    {"bridge", "checkpoint-settle", "attempt_1"},
 		"short evidence": {"bridge", "checkpoint-settle", "attempt_1", "--evidence", "looked"},
+		// The same for an operator's detach confirmation.
+		"detached, no attempt":     {"bridge", "checkpoint-detached"},
+		"detached, no evidence":    {"bridge", "checkpoint-detached", "attempt_1"},
+		"detached, short evidence": {"bridge", "checkpoint-detached", "attempt_1", "--evidence", "looked"},
 	} {
 		if _, code := run(t, bin, env, args...); code != 2 {
 			t.Errorf("%s: exit = %d, want 2", name, code)

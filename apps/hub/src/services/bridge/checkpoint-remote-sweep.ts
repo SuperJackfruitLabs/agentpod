@@ -64,6 +64,23 @@ export async function sweepRemoteDetach(deps: RemoteDetachDeps = remoteDetachDep
   return detached;
 }
 
+/** Why an operator's detach confirmation was refused, or that it was recorded. */
+export type OperatorDetachOutcome = "confirmed" | "in_progress" | "not_attached" | "raced";
+
+/**
+ * An operator's escape for a detach the agent's node refuses every time (a sweep that logs
+ * `remote.detach.invalid` for ever keeps the station busy): record the detach as confirmed, once
+ * the operator has restored the station's terminal on its node by hand. Only an ended attempt (one
+ * in progress detaches on its own way out, and settling it is `settle`), and only while its station
+ * may still be attached (a one-shot attempt never is). Asks nothing of any node; the caller audits it.
+ */
+export async function confirmRemoteDetachByOperator(attempt: RetainedCheckpointAttempt): Promise<OperatorDetachOutcome> {
+  if (!CHECKPOINT_TERMINAL_PHASES.has(attempt.row.phase)) return "in_progress";
+  const state = parseRemoteState(attempt.row.remote);
+  if (!state || !mayBeAttached(state)) return "not_attached";
+  return await recordCheckpointRemoteDetached(attempt, canonicalRemoteState({ ...state, detached: true })) ? "confirmed" : "raced";
+}
+
 /** Ended attempts whose remote state says not detached. A row that does not pass its checks is named and skipped. */
 async function undetachedAttempts(): Promise<RetainedCheckpointAttempt[]> {
   const rows = await db.select().from(checkpointDispatches).where(and(inArray(checkpointDispatches.phase, [...CHECKPOINT_TERMINAL_PHASES]),

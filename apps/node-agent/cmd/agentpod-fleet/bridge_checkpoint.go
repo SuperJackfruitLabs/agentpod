@@ -34,3 +34,24 @@ func fleetBridgeCheckpointSettle(args []string) {
 	fleetSkillJSON(http.MethodPost, "/api/admin/checkpoint/attempts/"+url.PathEscape(attempt)+"/settle",
 		map[string]any{"confirm": attempt, "evidence": *evidence})
 }
+
+// fleetBridgeCheckpointDetached records that an ended remote bench stage's station is detached,
+// once the operator has restored its terminal on its node by hand: the escape for a detach the
+// node refuses for ever, which otherwise keeps the station busy. The hub asks no node, refuses an
+// attempt still in progress, and audits it with the evidence.
+func fleetBridgeCheckpointDetached(args []string) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintf(os.Stderr, "checkpoint-detached requires an ATTEMPT id\n\n%s\n", fleetcli.BridgeUsage)
+		os.Exit(2)
+	}
+	attempt := args[0]
+	fs := flag.NewFlagSet("fleet bridge checkpoint-detached", flag.ExitOnError)
+	evidence := fs.String("evidence", "", "what you checked on the station's node, and how its terminal was restored")
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
+	if len(strings.TrimSpace(*evidence)) < 20 {
+		fmt.Fprintf(os.Stderr, "checkpoint-detached requires --evidence of at least 20 characters\n\n%s\n", fleetcli.BridgeUsage)
+		os.Exit(2)
+	}
+	fleetSkillJSON(http.MethodPost, "/api/admin/checkpoint/attempts/"+url.PathEscape(attempt)+"/detached",
+		map[string]any{"confirm": attempt, "evidence": *evidence})
+}

@@ -153,6 +153,33 @@ names. `SOCKET` is benchd's socket, and `STATE`, `DATA`, `CGROUP_ROOT` and `TIME
 **Not built yet:** a SuperBench release that discards the tree back to its last checkpoint. Until
 it exists, a dirty bench always needs the steps above.
 
+### A station whose detach never confirms
+
+An ended attempt keeps its station busy until the station's node confirms the detach. The hub's
+detach sweep asks again every five minutes. A node that is offline confirms once it is back. A
+node that **refuses** the detach every time (the hub logs `remote.detach.invalid` on each pass)
+never does, and the station stays busy.
+
+To free such a station:
+
+1. On the station's node, restore the profile's terminal by hand: put back the `terminal:` section
+   the attach replaced (the node's attachment journal under its config directory,
+   `bench-attachments/STATION.json`, holds the original lines as `prior`), remove the managed
+   `known_hosts` pair the journal names (`known_hosts` and `pinned`), and remove the
+   `agentpod-bench.json` file from the profile, the bench certificate (`KEY-cert.pub`, beside the
+   `key_path` the journal names) and the journal itself.
+2. Record it, with what you checked:
+
+   ```sh
+   fleet bridge checkpoint-detached ATTEMPT --evidence "restored the terminal by hand; journal removed"
+   ```
+
+The hub records the detach as confirmed and the station takes work again. It asks no node and
+changes nothing else, and the workspace's audit log keeps your evidence. It is refused (409) while
+the attempt is still in progress (`in_progress`; settle it with `fleet bridge checkpoint-settle`
+first), and for a station that is already detached or was never attached (`not_attached`). Only a
+workspace owner or admin can run it.
+
 ## Known limits
 
 - The turn's 30-minute limit is fixed; a stage cannot raise it yet.

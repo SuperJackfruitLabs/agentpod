@@ -61,7 +61,7 @@ var adminCommands = []clidoc.Command{
 	{
 		Path: "bridge", Group: "Administration",
 		Summary:  "The board roster: which agent claims from which board.",
-		Synopsis: "fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle> ...",
+		Synopsis: "fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle|checkpoint-detached> ...",
 		Help:     BridgeUsage,
 		Detail: "This table is the gate on an agent doing anything at all: a staffed, online agent " +
 			"claims no card until a row points it at a board. No verb here prints a credential. " +
@@ -151,6 +151,21 @@ var adminCommands = []clidoc.Command{
 		Handlers: []string{"fleetBridgeCheckpointSettle"},
 		Flags:    []clidoc.Flag{{Name: "evidence", Arg: "TEXT", Required: true}},
 		Example:  "fleet bridge checkpoint-settle attempt_0123 --evidence \"node journal shows the record cancelled; no bench lease held\"",
+	},
+	{
+		Path: "bridge checkpoint-detached", Summary: "Record a remote bench stage's station as detached, after restoring it by hand.",
+		Synopsis: "fleet bridge checkpoint-detached ATTEMPT --evidence TEXT",
+		Detail: "For an ended remote attempt whose station the agent's node will not detach (the detach sweep logs " +
+			"`remote.detach.invalid` on every pass), which keeps the station busy. First restore the station's own " +
+			"terminal on its node by hand. The hub then records the detach as confirmed and the station takes work " +
+			"again. It asks no node, changes nothing else, and is audited with your evidence. Refused (409) while the " +
+			"attempt is still in progress (`in_progress`; settle it first), and for a station already detached, or " +
+			"never attached as with a one-shot attempt (`not_attached`). Without an ATTEMPT, or " +
+			"with evidence under 20 characters, exits 2 without calling the hub.",
+		Args:     []clidoc.Arg{{Name: "ATTEMPT", Meaning: "an ended remote attempt's `attempt_` id"}},
+		Handlers: []string{"fleetBridgeCheckpointDetached"},
+		Flags:    []clidoc.Flag{{Name: "evidence", Arg: "TEXT", Required: true}},
+		Example:  "fleet bridge checkpoint-detached attempt_0123 --evidence \"restored the profile's terminal by hand; no bench journal left\"",
 	},
 	{
 		Path: "bench", Group: "Administration",
