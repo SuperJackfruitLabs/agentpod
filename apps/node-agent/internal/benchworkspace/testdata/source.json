@@ -1,6 +1,7 @@
 {
   "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/treaty",
-  "revision": "d1d4dd0378c767447d318c27f29ce875c069ae7f",
+  "tag": "v0.0.22",
+  "revision": "6ddf3c2265548dabef74f00ce05a5c265008351d",
   "status": "PROPOSED; consumer wire checks do not accept protocol or prove source authority",
   "files": {
     "schemas/superbench/operation.v2.json": {
