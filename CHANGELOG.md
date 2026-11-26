@@ -105,6 +105,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   proxy open is refused the same way. Only the stage's own turn opens. Sessions
   that Hermes's own messaging platforms open are outside the hub and share the
   bench; turn those platforms off on a station that serves remote stages.
+- `bench.remote.attach` logs which `known_hosts` file it pinned the bench host
+  key in, and whether it created that file.
 
 ### Fixed
 

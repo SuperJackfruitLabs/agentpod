@@ -1,8 +1,10 @@
 package benchattach
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,5 +187,25 @@ func TestDetachUnpinsTheJournaledKnownHosts(t *testing.T) {
 	}
 	if strings.Contains(read(t, f.knownHosts), markerPrefix) {
 		t.Error("a managed line survived")
+	}
+}
+
+// Attach logs which known_hosts it pinned and whether it created it, and nothing of the key.
+func TestAttachLogsTheKnownHostsItPinned(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	f := newFixture(t)
+	kh := filepath.Join(t.TempDir(), ".ssh", "known_hosts")
+	f.m.KnownHosts = fixedKnownHosts(kh)
+	if _, err := f.m.Attach(context.Background(), attachment("att-1", certA, 30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "pinned the bench host key for attempt att-1 in "+kh+" (created true)") {
+		t.Errorf("log = %q, want the pinned file and that attach created it", got)
+	}
+	if strings.Contains(got, "AAAA") {
+		t.Errorf("log carries key material: %q", got)
 	}
 }

@@ -246,6 +246,8 @@ func (m Manager) Attach(ctx context.Context, a Attachment) (time.Time, error) {
 		return fail(fmt.Errorf("benchattach: pinning host key: %w", err))
 	}
 	undo = append(undo, func() { _ = unpinRecord(r, knownHosts) })
+	log.Printf("benchattach: station %s pinned the bench host key for attempt %s in %s (created %t)",
+		a.StationID, a.AttemptID, knownHosts, created)
 	// 3. terminal section, then the plugin's state
 	wrote, err := m.Terminal.SetSSH(profileDir, r.Terminal)
 	if err != nil {
