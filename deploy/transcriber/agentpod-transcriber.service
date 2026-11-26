@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/agentpod-transcriber
+# TRANSCRIBER_TOKEN, optional TRANSCRIBER_EXTRA_TOKENS, host and port (README).
 EnvironmentFile=/etc/agentpod-transcriber.env
 Environment=HF_HOME=/opt/agentpod-transcriber/models
 ExecStart=/opt/agentpod-transcriber/.venv/bin/uvicorn server:app --host ${TRANSCRIBER_HOST} --port ${TRANSCRIBER_PORT}

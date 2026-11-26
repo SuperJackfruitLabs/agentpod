@@ -27,6 +27,14 @@ curl -s http://<tailscale ip>:8840/health
 
 The first start downloads the model (~1.6 GB) into `models/`.
 
+`TRANSCRIBER_TOKEN` is the hub's. Another client gets its own token rather
+than sharing that one: list them, comma-separated, in
+`TRANSCRIBER_EXTRA_TOKENS` in the same environment file
+(`TRANSCRIBER_EXTRA_TOKENS=<client a>,<client b>`) and restart. Any of the
+tokens is accepted, and the main one stays required. One token per
+additional client means a client's key can be rotated or revoked alone, by
+editing its entry, without touching the hub or the others.
+
 ## Hub
 
 Configure it in the console: **Admin → Transcription**, provider

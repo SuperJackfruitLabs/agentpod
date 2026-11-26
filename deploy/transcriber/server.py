@@ -16,6 +16,8 @@ Why these choices (benchmarked on foundry, 2026-09-26, Ryzen 5 3600, no GPU):
 
 Configuration (environment):
   TRANSCRIBER_TOKEN     bearer token the hub sends; required
+  TRANSCRIBER_EXTRA_TOKENS  more accepted bearer tokens, comma-separated, one
+                        per additional client; optional
   TRANSCRIBER_HOST      address to listen on (a Tailscale address, never 0.0.0.0)
   TRANSCRIBER_PORT      default 8840
   TRANSCRIBER_MODEL     default large-v3-turbo
@@ -35,6 +37,8 @@ from faster_whisper import BatchedInferencePipeline, WhisperModel
 from faster_whisper.audio import decode_audio
 
 TOKEN = os.environ["TRANSCRIBER_TOKEN"]
+# One per additional client, so each client's key is rotated or revoked alone.
+TOKENS = [TOKEN] + [t.strip() for t in os.environ.get("TRANSCRIBER_EXTRA_TOKENS", "").split(",") if t.strip()]
 MODEL_NAME = os.environ.get("TRANSCRIBER_MODEL", "large-v3-turbo")
 THREADS = int(os.environ.get("TRANSCRIBER_THREADS", "6"))
 BATCH = int(os.environ.get("TRANSCRIBER_BATCH", "8"))
@@ -48,8 +52,12 @@ app = FastAPI(title="agentpod-transcriber")
 
 
 def check_token(authorization: str | None) -> None:
-    expected = f"Bearer {TOKEN}"
-    if not authorization or not hmac.compare_digest(authorization, expected):
+    given = (authorization or "").encode()
+    # Compare against every token, so the time taken says nothing about which matched.
+    matched = False
+    for token in TOKENS:
+        matched |= hmac.compare_digest(given, f"Bearer {token}".encode())
+    if not authorization or not matched:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
