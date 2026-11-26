@@ -10,6 +10,27 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Upgrade notes
+
+- Migration 0141 (`superdial_call_devices`) runs when the hub deploys.
+- Calls stay off until `SUPERDIAL_AGENT_URL` and `SUPERDIAL_AGENT_TOKEN` are set (see
+  DEPLOYMENT.md → superdial calls). Existing bridge rooms need
+  `scripts/superdial-call-power-levels.ts --apply` once before a person can join a call in them.
+
+### Added
+
+- Calls with bridge-mode agents (superdial): the hub notices a person's
+  `org.matrix.msc3401.call.member` in a bridge agent's room and asks superdial-agent to join as
+  the agent's `SUPERDIAL` call device, minted once by appservice login and kept encrypted; it
+  answers SuperExchange's `POST /internal/superdial/membership`, takes superdial-agent's
+  `POST /internal/superdial/turns/{turn_id}/cancel`, and sends each spoken turn's reply to the
+  call instead of a voice note. New bridge rooms let members publish call membership.
+
+### Fixed
+
+- An agent's crypto machine is fed only its own device's one-time-key counts, fallback key types
+  and to-device messages; a second device of the same agent no longer overwrites them.
+
 ## v0.1.134 — 2026-11-26
 
 ### Upgrade notes
