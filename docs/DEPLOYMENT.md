@@ -499,6 +499,21 @@ agents are refused either way. What each read answers is on the docs site:
 | `ROSTER_READERS` | `GET /api/bridge/boards/:boardId/roster`, `GET /api/bridge/stations/:id` and `GET /api/bridge/principals/:prn/boards`: the bridge roster, for a placement service and for Superlibrary |
 | `CATALOG_READERS` | `GET /api/catalog`, `GET /api/catalog/stations` and `GET /api/catalog/stations/:id`: what exists in the workspace and which station has it |
 
+### superdial calls
+
+Voice calls with bridge-mode agents. The call itself runs in **superdial-agent**, a separate
+container from the `superdial` repository that joins a call as the agent's second Matrix device;
+the hub notices the call, hands superdial-agent that device, and sends it each spoken turn's
+reply. Off unless both of the first two variables are set, and then nothing about calls runs:
+call memberships are ignored and the membership check answers `calls_disabled`. Day-2 operation:
+[OPERATING.md → 7j. Calls with an agent](./OPERATING.md#7j-calls-with-an-agent-superdial).
+
+| Variable | Meaning |
+|---|---|
+| `SUPERDIAL_AGENT_URL` | Where superdial-agent serves its call API, over loopback or the Docker network — never a public address. Trailing slashes are stripped. Unset: calls are off. |
+| `SUPERDIAL_AGENT_TOKEN` | The bearer both directions of the hub ↔ superdial-agent API carry; the same value is given to superdial-agent. Unset: calls are off. |
+| `SUPERDIAL_MEMBERSHIP_TOKEN` | The bearer SuperExchange's token service presents to the hub's membership check. Unset: every check is answered `401`, so the token service refuses every call. |
+
 ### Other settings
 
 | Variable | Meaning |

@@ -8,6 +8,7 @@ import {
   feedAgents,
   noOlmRecipients,
   STALE_RETRY_COOLDOWN_MS,
+  type AgentCrypto,
   type CryptoRequest,
   type ShareReport,
 } from "./crypto";
@@ -282,7 +283,7 @@ describe("narrowing a transaction to the agents in it", () => {
           ? { AGENTPOD: [] as string[], SUPERDIAL: ["signed_curve25519"] }
           : { SUPERDIAL: ["signed_curve25519"], AGENTPOD: [] as string[] };
       await feedAgents(
-        crypto as any,
+        crypto as unknown as AgentCrypto,
         {
           toDevice: [],
           deviceLists: { changed: [], left: [] },
@@ -300,7 +301,7 @@ describe("narrowing a transaction to the agents in it", () => {
     // would read as "the fallback key was used" and rotate it for nothing.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto as unknown as AgentCrypto,
       {
         toDevice: [],
         deviceLists: { changed: [], left: [] },

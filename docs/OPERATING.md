@@ -1582,6 +1582,22 @@ journalctl -u agentpod-hub -n 50 --no-pager | grep push-gateway
 
 ---
 
+### 7j. Calls with an agent (superdial)
+
+A person can call a **bridge-mode** agent from SuperMessage desktop. What they say is transcribed
+and posted as their own message, the agent answers it in the room's session like any message,
+and the reply is spoken back. The media and speech run in **superdial-agent**, a container from
+the `superdial` repository; the hub's part is everything that needs the agent's identity.
+Settings: [DEPLOYMENT.md → superdial calls](./DEPLOYMENT.md#superdial-calls).
+
+**The call device.** Each bridge agent gets a second Matrix device, `SUPERDIAL`, minted once by
+appservice login (which logs nothing out) the first time somebody calls it, and reused after
+that. Its access token is kept encrypted with `ENCRYPTION_KEY` in `superdial_call_devices`, and it
+is the only Matrix credential superdial-agent ever holds for an agent: it never sees the
+appservice token. The hub's own crypto device is untouched, and the hub reads only that device's
+one-time-key counts from a transaction. Deleting a row makes the next call mint the device again,
+which replaces its token.
+
 ## 8. The superpipeline bridge
 
 The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It

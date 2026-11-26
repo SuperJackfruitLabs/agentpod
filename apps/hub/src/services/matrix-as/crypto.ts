@@ -758,7 +758,7 @@ export async function feedAgents(
     // MSC3202 reports counts per device; only the hub's own device's are read. An agent named
     // here only by a device-list change gets none, as before.
     const device = tx.otkCounts[userId] || tx.unusedFallbackKeys[userId] ? await ownDevice(userId) : "";
-    const otk: Record<string, number> = { ...(tx.otkCounts[userId]?.[device] ?? {}) };
+    const otk: Record<string, number> = { ...tx.otkCounts[userId]?.[device] };
     const fallback = new Set<string>(tx.unusedFallbackKeys[userId]?.[device] ?? []);
 
     await crypto.receive(userId, {
