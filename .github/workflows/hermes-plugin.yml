@@ -97,15 +97,34 @@ jobs:
           git -C "$RUNNER_TEMP/hermes" checkout --quiet "${{ steps.ref.outputs.ref }}"
           git -C "$RUNNER_TEMP/hermes" log -1 --format='commit %H (%ad)' --date=short | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Newer Hermes gates every core dependency on `python_version >= '3.14'`
+      # (requires-python is >=3.11,<3.15), so on 3.12 pip installs the package
+      # with no dependencies at all and the contract dies on the first import.
+      # Older refs (the fleet's) have no such gate and run on 3.12. Read it
+      # from the checkout rather than naming a Python per target.
+      - name: Pick the Python this Hermes needs
+        id: py
+        run: |
+          if grep -Eq "python_version *>= *['\"]3\.14['\"]" "$RUNNER_TEMP/hermes/pyproject.toml"; then
+            echo "version=3.14" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=3.12" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.12"
+          python-version: ${{ steps.py.outputs.version }}
 
+      # Install from inside the checkout: Hermes pins Pillow through
+      # [tool.uv] override-dependencies, and uv only reads that from the
+      # project in the working directory. From anywhere else the resolve fails
+      # on a Pillow conflict between its own pins.
       - name: Install Hermes
+        working-directory: ${{ runner.temp }}/hermes
         run: |
-          uv venv "$RUNNER_TEMP/venv"
-          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --quiet -e "$RUNNER_TEMP/hermes[acp]"
+          uv venv --python "${{ steps.py.outputs.version }}" "$RUNNER_TEMP/venv"
+          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --quiet -e ".[acp]"
 
       - name: Run the contract
         working-directory: ${{ env.PLUGIN_DIR }}
