@@ -341,8 +341,12 @@ export async function failCheckpointAttempt(attempt: RetainedCheckpointAttempt,
 export async function closeFailedCheckpointAttempt(attempt: RetainedCheckpointAttempt,
   outcome: CheckpointFailureReport["outcome"], board?: CheckpointFailureReport["board"]): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
   if (attempt.row.phase !== "failure_pending") throw new CheckpointRefused("stale", "ledger.phase");
+  // Canonical JSON has no null, and the board's run view leaves some fields null (an ended run's card names
+  // no run): those fields are left out of the report rather than failing the close.
+  const said = board === undefined ? undefined
+    : { reason: board.reason, board: Object.fromEntries(Object.entries(board.board).filter(([, value]) => value !== null)) };
   const report: CheckpointFailureReport = { version: "agentpod.checkpoint-failure-report.v1", outcome, at: new Date().toISOString(),
-    ...(board === undefined ? {} : { board }) };
+    ...(said === undefined ? {} : { board: said }) };
   const [updated] = await db.update(checkpointDispatches).set({ phase: "failed", failureReport: canonicalCheckpoint(report), updatedAt: new Date() })
     .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
       eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, "failure_pending"))).returning();
