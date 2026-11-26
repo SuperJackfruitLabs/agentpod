@@ -28,6 +28,8 @@ interface MatrixEvent {
   sender: string;
   room_id?: string;
   event_id?: string;
+  /** Present on state events — a call membership (`org.matrix.msc3401.call.member`) among them. */
+  state_key?: string;
   content?: Record<string, unknown>;
 }
 

@@ -194,7 +194,13 @@ export interface MatrixBridge {
   /** Give a station its identity and room. Safe to call repeatedly. */
   provision(stationId: string): Promise<void>;
   /** Handle one event the homeserver pushed. */
-  onEvent(event: { type: string; sender: string; room_id?: string; content?: Record<string, unknown> }): Promise<void>;
+  onEvent(event: {
+    type: string;
+    sender: string;
+    room_id?: string;
+    state_key?: string;
+    content?: Record<string, unknown>;
+  }): Promise<void>;
   /** Create the room behind an alias the homeserver asked about. */
   onProvisionAlias(alias: string): Promise<void>;
   /**
