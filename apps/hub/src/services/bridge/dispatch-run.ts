@@ -64,6 +64,9 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       held = true;
     }
     if (resumed && resumed.status !== "unreported") return resumed;
+    // Asked after the recovery, which is how the attempt holding the station is driven at all. The
+    // attempt's own pass (a remote turn still running) is the cycle's answer, so it is re-read soon.
+    if (deps.benchBusy && await deps.benchBusy()) return resumed ?? { status: "idle" };
     if (resumed) {
       // A run still going (`recheckMs`, the benign execute park) holds new checkpoint claims too, but
       // it is not a refusal: the orchestrator already said it at info, and the next cycle re-reads it.
@@ -97,6 +100,9 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       refuse(new CheckpointRefused("authority", `credential.${error.reason}`));
     }
   }
+
+  // No loop on a station a remote bench stage holds claims ordinary work either (operator decision 2).
+  if (deps.benchBusy && await deps.benchBusy()) return { status: "idle" };
 
   const strict = await acp.strictWork?.({
     stationId: agent.stationId,

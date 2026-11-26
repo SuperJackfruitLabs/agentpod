@@ -119,6 +119,34 @@ test("--keep-bench: the hub never clears that stage's benches, and does not read
   expect(w.reads).toEqual([]);
 });
 
+// ─── a remote bench stage (the agent works in the bench from its own node) ───────────────────────
+
+test("clearing skips a card whose attempt is working", async () => {
+  // Attached, working, finishing: the bench is the agent's workspace. Even a card the board says is done keeps it.
+  for (const phase of ["attach_pending", "working", "finish_pending"]) {
+    const w = world(() => card("completed"), [{ attempts: [attempt(), attempt({ phase })] }]);
+    expect((await sweepBenchClearing(w.deps))[0]?.outcome).toBe("unsettled");
+    expect(w.reclaimed).toEqual([]);
+    expect(w.reads).toEqual([]);
+  }
+});
+
+test("clearing after a settled remote attempt follows keep_bench", async () => {
+  // Settled (reported), its stage keeping benches: never cleared, the card never read.
+  const kept = world(() => card("completed"), [{ attempts: [attempt({ phase: "reported" })] }], { keepBench: async () => true });
+  expect((await sweepBenchClearing(kept.deps))[0]?.outcome).toBe("kept");
+  expect(kept.reclaimed).toEqual([]);
+  // Not kept: cleared on the bench host's node exactly as a one-shot attempt's, once the card is done.
+  const a = attempt({ phase: "reported", nodeId: "node_bench" });
+  const cleared = world(() => card("completed"), [{ attempts: [a] }]);
+  expect(await sweepBenchClearing(cleared.deps)).toEqual([{ cardId: "card_1", outcome: "cleared", reason: "completed" }]);
+  expect(cleared.reclaimed).toEqual([{ nodeId: "node_bench", tenantId: "fleet_t", boardId: "brd_b", stationId: "stn_s", cardId: "card_1",
+    reason: "completed" }]);
+  // Still on the board: warm, as for one-shot.
+  const warm = world(() => card("submitted"), [{ attempts: [attempt({ phase: "reported" })] }]);
+  expect((await sweepBenchClearing(warm.deps))[0]?.outcome).toBe("warm");
+});
+
 test("a card that used two nodes is cleared on both; a node whose stage keeps benches is left, and its attempts stay", async () => {
   const onA = attempt({ nodeId: "node_a" }), onB = attempt({ nodeId: "node_b" });
   const both = world(() => card("completed"), [{ attempts: [onA, onB] }]);

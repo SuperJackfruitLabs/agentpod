@@ -250,3 +250,16 @@ test("an attempt whose card moved off the stage is retired, and another card's c
     runId: "run_" + suffix + "m2", policy, policyDigest: checkpointPolicyDigest(policy) });
   expect((await reserveCheckpointAttempt(profile, other, task)).send).toBe(true);
 });
+
+test("a held failure closes run_ended though the board's run view leaves fields null", async () => {
+  const attempt = await executePending("a9");
+  const held = await failCheckpointAttempt(attempt, { code: "remote.dirty", disposition: "failed",
+    reason: "Checkpoint failed: fixture", evidence: "{}" });
+  const ended = { reason: "run.ended", board: { status: "ended", outcome: "failed", endedAt: "2026-11-26T01:36:28.000Z",
+    leaseEpoch: 2, cardRunId: null, cardStage: "bench" } };
+  const closed = (await closeFailedCheckpointAttempt(held.attempt, "run_ended", ended)).attempt;
+  expect(closed.row.phase).toBe("failed");
+  const report = JSON.parse(closed.row.failureReport ?? "{}");
+  expect(report).toMatchObject({ outcome: "run_ended", board: { reason: "run.ended", board: { status: "ended", leaseEpoch: 2, cardStage: "bench" } } });
+  expect("cardRunId" in report.board.board).toBe(false);
+});

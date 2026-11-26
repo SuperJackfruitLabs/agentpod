@@ -12,7 +12,8 @@ import { grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { connectionManager } from "../broker";
 import { isControlPairEnforced } from "../control";
 import { canonicalCheckpoint } from "./checkpoint-json";
-import { CheckpointRefused, normalizeRosterProfileKey, type CheckpointProfile, type CheckpointRefusalReason } from "./checkpoint-profile";
+import { CheckpointRefused, checkpointStationNode, normalizeRosterProfileKey, type CheckpointProfile,
+  type CheckpointRefusalReason } from "./checkpoint-profile";
 
 export interface CheckpointAuthority {
   organizationId: string;
@@ -74,7 +75,8 @@ export function factsRefusal(facts: RosterFacts | undefined, profile: Checkpoint
   if (!isControlPairEnforced()) return "facts.enforcement";
   if (facts.source !== "org-plane") return "facts.tenant.source";
   if (facts.organizationId !== profile.organizationId) return "facts.tenant.organization";
-  if (facts.nodeId !== profile.target.node_id) return "facts.node";
+  // A remote stage's station is on its own node, not the bench host's (`checkpointStationNode`).
+  if (facts.nodeId !== checkpointStationNode(profile)) return "facts.node";
   if (facts.principalId !== profile.occupantPrincipalId) return "facts.principal";
   if (facts.ownerPrincipalId !== profile.ownerPrincipalId) return "facts.owner";
   if (facts.occupancyEpoch !== profile.occupancyEpoch) return "facts.epoch";

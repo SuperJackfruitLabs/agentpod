@@ -143,6 +143,30 @@ type Task struct {
 	// means every repository of the profile.
 	RepositoryNames []string `json:"repository_names,omitempty"`
 }
+
+// Report is a remote agent's account of its turn, as the hub sends it to
+// finish: untrusted text, like a worker's handoff. Its canonical bytes are
+// what the completion's worker result digest names.
+type Report struct {
+	Handoff map[string]string `json:"handoff"`
+	Outcome string            `json:"outcome"`
+}
+
+// RemoteCredential is a writer certificate for the agent's own public key and
+// what its SSH client needs to use it. It is public; it never carries the
+// lease token or a private key.
+type RemoteCredential struct {
+	Certificate        string `json:"certificate"`
+	User               string `json:"user"`
+	Address            string `json:"address"`
+	HostKey            string `json:"host_key"`
+	HostKeyFingerprint string `json:"host_key_fingerprint"`
+	LeaseID            string `json:"lease_id"`
+	Generation         uint64 `json:"generation"`
+	ValidBefore        string `json:"valid_before"`
+	WorkingDirectory   string `json:"working_directory"`
+}
+
 type Request struct {
 	Version       string    `json:"version"`
 	Operation     string    `json:"operation"`
@@ -154,6 +178,10 @@ type Request struct {
 	Task          *Task     `json:"task,omitempty"`
 	BindingSHA256 string    `json:"binding_sha256,omitempty"`
 	SourceReceipt *Receipt  `json:"source_receipt,omitempty"`
+	// PublicKey is the remote agent's OpenSSH public key line (attach).
+	PublicKey string `json:"public_key,omitempty"`
+	// Report is the remote agent's report (finish).
+	Report *Report `json:"report,omitempty"`
 }
 
 // Detail says why a refused (or parked) attempt is as it is, in the bench's
@@ -181,4 +209,6 @@ type Response struct {
 	Target     *Target     `json:"target,omitempty"`
 	Source     *Prepared   `json:"source,omitempty"`
 	Completion *Completion `json:"completion,omitempty"`
+	// Credential answers an attach.
+	Credential *RemoteCredential `json:"credential,omitempty"`
 }

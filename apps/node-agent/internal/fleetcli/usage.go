@@ -33,17 +33,20 @@ const BridgeUsage = `usage:
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
   fleet bridge checkpoint-attempts
-  fleet bridge checkpoint-settle ATTEMPT --evidence TEXT`
+  fleet bridge checkpoint-settle ATTEMPT --evidence TEXT
+  fleet bridge checkpoint-detached ATTEMPT --evidence TEXT`
 
 const BenchUsage = `usage:
   fleet bench stage list
   fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
                        --repo name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] ...
                        --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                       | --execution remote --bench-node NODE
                        [--cards-choose [--default-repo N ...]]
                        [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]
   fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo ... ...]
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                       [--execution one-shot|remote] [--bench-node NODE]
                        [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
   fleet bench stage rm NAME
@@ -59,7 +62,10 @@ under the SuperPipeline stage field it goes in: checkpointPolicy, or
 cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A card's bench is kept from stage to stage and
 cleared once the card is done, cancelled or dormant; the hub never clears the
-benches of a stage set --keep-bench.`
+benches of a stage set --keep-bench. A stage is one-shot by default: the bench
+host runs --worker as one task. With --execution remote the station's agent
+(Hermes) works in the card's bench from its own node, over SSH, through the
+bench host's node named by --bench-node.`
 
 const ConfigUsage = `usage:
   fleet config settings                                         every setting the fleet can declare

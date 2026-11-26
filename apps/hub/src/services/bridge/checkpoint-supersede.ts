@@ -14,11 +14,16 @@
  *     this status read is also what asks the node to retire.
  * - Anything else stays parked, named, for an owner or admin to settle explicitly.
  *
- * Status is read-only on the wire; it is the one request this path sends.
+ * Status is read-only on the wire; it is the one request this path sends to the bench host's node.
+ *
+ * A remote bench stage's attempt can never be driven again either, so its agent stops first: `detach`
+ * ends the agent's session and detaches its station whatever the resolution (a failed detach is
+ * named and left to the sweep). Its run is then reclaimed by the board and ended as any other.
  */
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse, type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
-import { errorFacts, type ErrorFacts } from "./checkpoint-log";
+import { errorFacts, noteCheckpoint, type ErrorFacts } from "./checkpoint-log";
+import { endRemoteWork } from "./checkpoint-remote";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 import { NO_PRODUCER_EFFECT_PHASES, retireCheckpointAttempt, type CheckpointRetirementReason,
   type RetainedCheckpointAttempt } from "./checkpoint-ledger";
@@ -43,11 +48,13 @@ export interface NodeStatusSummary {
 }
 
 /** The attempt as this path reads it: its phase. Generic so tests need no ledger row. */
-interface Phased { row: { phase: string } }
+interface Phased { row: { phase: string; tenantId?: string; attemptId?: string } }
 
 export interface SupersedeDeps<A extends Phased = RetainedCheckpointAttempt> {
   status(attempt: A): Promise<NodeStatusSummary>;
   retire(attempt: A, retirement: { reason: CheckpointRetirementReason; by: string; evidence: string }): Promise<boolean>;
+  /** End a remote attempt's agent work: its session and its station's attachment (checkpoint-remote.ts `endRemoteWork`). */
+  detach?(attempt: A): Promise<unknown>;
 }
 
 /** The node's status for the attempt's exact retained identity and target. Never prepare, never execute. */
@@ -67,7 +74,11 @@ async function nodeStatusReply(attempt: RetainedCheckpointAttempt): Promise<Benc
   return parseBenchCoordinatorResponse(new TextEncoder().encode(raw), sent);
 }
 
-const defaults: SupersedeDeps = { status: nodeStatus, retire: retireCheckpointAttempt };
+const SUPERSEDED = "The bench stage's profile was replaced.";
+/** The real effects. A caller with the station's ACP port passes its own `detach`, which also ends a session a restart left. */
+export const defaultSupersedeDeps: SupersedeDeps = { status: nodeStatus, retire: retireCheckpointAttempt,
+  detach: (attempt) => endRemoteWork(attempt, { request: nodeRequest }, SUPERSEDED) };
+const defaults = defaultSupersedeDeps;
 
 /** Which node reply proves nothing is outstanding, for this phase. Exported for tests. */
 export function provenEffectFree(phase: string, reply: NodeStatusSummary): CheckpointRetirementReason | undefined {
@@ -82,6 +93,8 @@ export function resolveSupersededAttempt(attempt: RetainedCheckpointAttempt): Pr
 export function resolveSupersededAttempt<A extends Phased>(attempt: A, deps: SupersedeDeps<A>): Promise<SupersededResolution>;
 export async function resolveSupersededAttempt(attempt: Phased,
   deps: SupersedeDeps<Phased> = defaults): Promise<SupersededResolution> {
+  if (deps.detach) await deps.detach(attempt).catch((error: unknown) => noteCheckpoint("superseded", "remote.detach",
+    { tenantId: attempt.row.tenantId, attemptId: attempt.row.attemptId, phase: attempt.row.phase }, error));
   if (!NO_PRODUCER_EFFECT_PHASES.has(attempt.row.phase)) return { outcome: "parked", reason: "superseded.effect_possible" };
   let reply: NodeStatusSummary;
   try { reply = await deps.status(attempt); }

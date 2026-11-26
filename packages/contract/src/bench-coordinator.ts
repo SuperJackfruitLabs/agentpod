@@ -102,6 +102,50 @@ const receipt = z.object({ run_id: product("run"), epoch: integer.min(1), source
 const selectors = { tenant_id: id, board_id: product("brd"), station_id: id };
 const fixed = { version: z.literal(BENCH_COORDINATOR_VERSION) };
 const owned = { identity: BenchCoordinatorIdentity, target: BenchCoordinatorTarget };
+
+// ─── remote launch (`remote-v1`): attach and finish ──────────────────────────
+// attach asks the bench host's node for a writer certificate for the remote agent's own public key (again,
+// with the same key, to renew it); finish hands it the agent's report, and the node checkpoints, stops and
+// releases. Neither carries a lease token, a private key or a path.
+/** The most bytes of attach's public key line. */
+export const BENCH_COORDINATOR_MAX_PUBLIC_KEY = 8192;
+/** The most canonical bytes of finish's handoff (sorted keys, printable ASCII literal, the rest `\uXXXX`). */
+export const BENCH_COORDINATOR_MAX_HANDOFF = 32 * 1024;
+const utf8 = (value: string) => new TextEncoder().encode(value).byteLength;
+const noControl = (value: string) => scalar(value) && !/\p{Cc}/u.test(value);
+const canonicalLength = (value: string) => {
+  let n = 2;
+  for (const part of value) {
+    const c = part.codePointAt(0) ?? 0;
+    n += c === 0x22 || c === 0x5c ? 2 : c >= 32 && c <= 126 ? 1 : c > 0xffff ? 12 : 6;
+  }
+  return n;
+};
+const canonicalHandoffSize = (value: Record<string, string>) => {
+  const entries = Object.entries(value);
+  return 2 + entries.reduce((n, [field, text]) => n + canonicalLength(field) + 1 + canonicalLength(text), 0) + Math.max(0, entries.length - 1);
+};
+const publicKey = z.string().min(1).refine((v) => utf8(v) <= BENCH_COORDINATOR_MAX_PUBLIC_KEY && noControl(v));
+const report = z.object({ handoff, outcome: z.literal("complete") }).strict()
+  .refine((r) => canonicalHandoffSize(r.handoff) <= BENCH_COORDINATOR_MAX_HANDOFF);
+/** A writer certificate for the agent's own key and what its SSH client needs; public, never a token or key. */
+export const BenchCoordinatorRemoteCredential = z.object({
+  certificate: z.string().max(16384).regex(/^(?:ssh-ed25519|ecdsa-sha2-nistp256)-cert-v01@openssh\.com [A-Za-z0-9+/=]+(?: [ -~]*)?(?![\s\S])/),
+  user: z.string().regex(/^b-[a-f0-9]{32}(?![\s\S])/),
+  address: z.string().regex(/^(?:[0-9]{1,3}(?:\.[0-9]{1,3}){3}|\[[0-9A-Fa-f:.]+\]):[0-9]{1,5}(?![\s\S])/),
+  host_key: z.string().max(BENCH_COORDINATOR_MAX_PUBLIC_KEY).regex(/^[a-z0-9@.-]{1,64} [A-Za-z0-9+/=]+(?: [ -~]*)?(?![\s\S])/),
+  host_key_fingerprint: z.string().regex(/^SHA256:[A-Za-z0-9+/]{1,128}(?![\s\S])/),
+  lease_id: id, generation: integer.min(1),
+  valid_before: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z(?![\s\S])/),
+  working_directory: z.string().min(2).refine((v) => v.startsWith("/") && utf8(v) <= 4096 && noControl(v)),
+}).strict();
+export type BenchCoordinatorRemoteCredential = z.infer<typeof BenchCoordinatorRemoteCredential>;
+export const BenchCoordinatorAttachRequest = z.object({ ...fixed, operation: z.literal("attach"), ...selectors, ...owned,
+  binding_sha256: sha, public_key: publicKey }).strict();
+export type BenchCoordinatorAttachRequest = z.infer<typeof BenchCoordinatorAttachRequest>;
+export const BenchCoordinatorFinishRequest = z.object({ ...fixed, operation: z.literal("finish"), ...selectors, ...owned,
+  binding_sha256: sha, report }).strict();
+export type BenchCoordinatorFinishRequest = z.infer<typeof BenchCoordinatorFinishRequest>;
 const requestUnion = z.discriminatedUnion("operation", [
   z.object({ ...fixed, operation: z.literal("ready"), ...selectors }).strict(),
   z.object({ ...fixed, operation: z.literal("prepare"), ...owned, task: z.object({
@@ -118,27 +162,33 @@ const requestUnion = z.discriminatedUnion("operation", [
     t.repository_names.every((n, i) => i === 0 || (t.repository_names?.[i - 1] ?? "") < n))) }).strict(),
   z.object({ ...fixed, operation: z.literal("execute"), ...owned, binding_sha256: sha, source_receipt: receipt }).strict(),
   z.object({ ...fixed, operation: z.literal("status"), ...owned }).strict(),
+  BenchCoordinatorAttachRequest, BenchCoordinatorFinishRequest,
 ]);
 const matched = (i: z.infer<typeof BenchCoordinatorIdentity>, t: z.infer<typeof BenchCoordinatorTarget>) =>
   i.tenant_id === t.tenant_id && i.board_id === t.board_id && i.agent_id === t.agent_id &&
   i.station_id === t.station_id && i.node_id === t.node_id;
 export const BenchCoordinatorRequest = requestUnion.refine((r) => r.operation === "ready" ||
   matched(r.identity, r.target) && (r.operation !== "execute" ||
-    r.source_receipt.run_id === r.identity.run_id && r.source_receipt.epoch === r.identity.epoch))
+    r.source_receipt.run_id === r.identity.run_id && r.source_receipt.epoch === r.identity.epoch) &&
+  (r.operation !== "attach" && r.operation !== "finish" || r.tenant_id === r.identity.tenant_id &&
+    r.board_id === r.identity.board_id && r.station_id === r.identity.station_id))
   .refine((r) => bytes(r) <= BENCH_COORDINATOR_MAX_REQUEST);
 export type BenchCoordinatorRequest = z.infer<typeof BenchCoordinatorRequest>;
 
 /** Node-authenticated fresh authority lookup; the URL and credential are installation-owned. */
 export const BENCH_COORDINATOR_CURRENT_VERSION = "agentpod.bench-coordinator-current.v1";
 export const BenchCoordinatorCurrentRequest = z.object({
-  version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), phase: z.enum(["prepare", "execute", "observe"]),
+  version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), phase: z.enum(["prepare", "execute", "observe", "attach", "finish"]),
   nonce: bid, identity: BenchCoordinatorIdentity, target: BenchCoordinatorTarget, profile_id: id,
   prepare_request_sha256: sha,
   execute_request_sha256: sha.optional(),
   binding_sha256: sha.optional(), source_digest: sha.optional(),
 }).strict().refine((r) => matched(r.identity, r.target) &&
   (r.source_digest === undefined || r.binding_sha256 !== undefined) &&
-  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.source_digest !== undefined && r.execute_request_sha256 !== undefined))
+  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.source_digest !== undefined && r.execute_request_sha256 !== undefined) &&
+  // A remote attach or finish names its binding and its own exact request bytes; it has no source receipt.
+  (r.phase !== "attach" && r.phase !== "finish" || r.binding_sha256 !== undefined && r.execute_request_sha256 !== undefined &&
+    r.source_digest === undefined))
   .refine((r) => bytes(r) <= BENCH_COORDINATOR_MAX_REQUEST);
 export type BenchCoordinatorCurrentRequest = z.infer<typeof BenchCoordinatorCurrentRequest>;
 const currentBase = { version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), nonce: bid,
@@ -164,20 +214,23 @@ export const BenchCoordinatorDetail = z.object({
   task: detailText.optional(),
 }).strict().refine((d) => d.message !== undefined || d.lease !== undefined || d.task !== undefined);
 export type BenchCoordinatorDetail = z.infer<typeof BenchCoordinatorDetail>;
-const pending = z.object({ ...fixed, operation: z.enum(["prepare", "execute", "status"]), ...owned,
+const pending = z.object({ ...fixed, operation: z.enum(["prepare", "execute", "status", "attach", "finish"]), ...owned,
   state: z.enum(["unknown", "pending", "superseded"]), detail: BenchCoordinatorDetail.optional() }).strict();
 const prepared = z.object({ ...fixed, operation: z.enum(["prepare", "status"]), ...owned,
   state: z.literal("prepared"), source: BenchCoordinatorPrepared }).strict();
-const completed = z.object({ ...fixed, operation: z.enum(["execute", "status"]), ...owned,
+const completed = z.object({ ...fixed, operation: z.enum(["execute", "status", "finish"]), ...owned,
   state: z.literal("completed"), completion: BenchCoordinatorCompletion }).strict();
+const attached = z.object({ ...fixed, operation: z.literal("attach"), ...owned,
+  state: z.literal("attached"), credential: BenchCoordinatorRemoteCredential }).strict();
 export const BenchCoordinatorResponse = z.union([
   z.object({ ...fixed, operation: z.literal("ready"), state: z.literal("available"), target: BenchCoordinatorTarget }).strict(),
   z.object({ ...fixed, operation: z.literal("ready"), state: z.literal("unavailable"),
     code: z.enum(["disabled", "unsupported", "offline", "unverified"]) }).strict(),
-  z.object({ ...fixed, operation: z.enum(["ready", "prepare", "execute", "status"]), state: z.literal("refused"),
+  z.object({ ...fixed, operation: z.enum(["ready", "prepare", "execute", "status", "attach", "finish"]), state: z.literal("refused"),
+    // dirty: a remote finish found uncommitted or untracked files; the lease is kept, the agent may commit and finish again.
     code: z.enum(["invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed",
-      "capacity_exhausted"]), detail: BenchCoordinatorDetail.optional() }).strict(),
-  pending, prepared, completed,
+      "capacity_exhausted", "dirty"]), detail: BenchCoordinatorDetail.optional() }).strict(),
+  pending, prepared, completed, attached,
 ]).refine((r) => {
   if (!("identity" in r)) return true;
   if (!matched(r.identity, r.target)) return false;
@@ -203,7 +256,7 @@ async function checkResponse(value: unknown, request: unknown): Promise<BenchCoo
     throw new Error("Coordinator response refused");
   const p = r.state === "prepared" ? r.source : r.state === "completed" ? r.completion.source : undefined;
   if (p && await benchCoordinatorBindingDigest(p.binding) !== p.binding_sha256) throw new Error("Coordinator response refused");
-  if (sent.operation === "execute" && p?.binding_sha256 !== undefined && p.binding_sha256 !== sent.binding_sha256)
+  if ((sent.operation === "execute" || sent.operation === "finish") && p?.binding_sha256 !== undefined && p.binding_sha256 !== sent.binding_sha256)
     throw new Error("Coordinator response refused");
   return r;
 }

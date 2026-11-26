@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattach"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchbridge"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
@@ -262,6 +264,20 @@ func runCmd() {
 	// git.identity.ensure: the public half of a station's push key, generated on first ask, and
 	// the author its commits are by.
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
+	// bench.identity.ensure and bench.remote.attach|detach|status: a Hermes station works in a
+	// remote bench through the bench's SSH door. The key, certificate and journal live in the
+	// config directory beside the git identities; the host key is pinned in the known_hosts file
+	// ssh itself names for the bench (this node runs the station's ACP sessions as its own user).
+	// Neither verb restarts the gateway.
+	benchAttach := benchattach.Manager{
+		Root:       gitIdentityRoot,
+		KnownHosts: benchattach.SSHKnownHosts,
+		Terminal:   hermes.HermesTerminal{},
+		Profile:    resolver.Workspace,
+	}
+	h = benchattach.NewHandler(h, benchattach.HandlerDeps{Root: gitIdentityRoot, Manager: benchAttach, HarnessFor: harnessFor})
+	// An attachment whose certificate expired is taken back without waiting for the hub.
+	go benchAttach.RunSweep(ctx, time.Minute)
 	// forge.api: one stk instance per station, created lazily at the first deliver or status for
 	// a station and routed by the frame's stationId. The capability is advertised only while the
 	// probe below says stk is usable; the verbs are registered regardless and answer an error
@@ -334,7 +350,11 @@ func runCmd() {
 	// Answered whether or not a registry is pinned, so the hub can tell "no registry here"
 	// from "this node predates the verbs".
 	// bench.reclaim: the hub reclaims a settled card's bench (answered "unavailable" with no registry).
-	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability, benchbridge.ReclaimCapability)
+	// bench.remote.credential: a remote-v1 profile's attach and finish (certificates from benchd for
+	// the leases this node holds); answered like every coordinator operation, refused with no registry.
+	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability, benchbridge.ReclaimCapability, benchremote.Capability)
+	// bench.remote.attach: this node can point a Hermes station at a remote bench.
+	extras.Capabilities = append(extras.Capabilities, benchattach.AttachCapability)
 	// RunWith returns only when ctx is done; shutdown is not an error worth reporting.
 	_ = gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)

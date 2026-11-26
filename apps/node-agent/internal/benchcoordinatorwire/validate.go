@@ -168,6 +168,18 @@ func parseRequest(raw []byte, limit int) (Request, error) {
 				return Request{}, ErrInvalid
 			}
 		}
+	case "attach", "finish":
+		names := []string{"version", "operation", "tenant_id", "board_id", "station_id", "identity", "target", "binding_sha256", "public_key"}
+		if r.Operation == "finish" {
+			names[len(names)-1] = "report"
+		}
+		if !fields(raw, names...) || r.Identity == nil || r.Target == nil || !matched(*r.Identity, *r.Target) || !hashes(r.BindingSHA256) ||
+			r.TenantID != r.Identity.TenantID || r.BoardID != r.Identity.BoardID || r.StationID != r.Identity.StationID {
+			return Request{}, ErrInvalid
+		}
+		if r.Operation == "attach" && !validPublicKey(r.PublicKey) || r.Operation == "finish" && !validReport(r.Report) {
+			return Request{}, ErrInvalid
+		}
 	default:
 		return Request{}, ErrInvalid
 	}
@@ -196,7 +208,7 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 		names = append(names, "detail")
 	}
 	if r.State == "refused" {
-		if !one(r.Code, "invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed", "capacity_exhausted") || !fields(raw, append(names, "code")...) {
+		if !one(r.Code, "invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed", "capacity_exhausted", "dirty") || !fields(raw, append(names, "code")...) {
 			return Response{}, ErrInvalid
 		}
 		return r, nil
@@ -229,8 +241,13 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 		}
 		p = r.Source
 		names = append(names, "source")
+	case "attached":
+		if r.Operation != "attach" || r.Credential == nil || !validCredential(*r.Credential) || !fields(raw, append(names, "credential")...) {
+			return Response{}, ErrInvalid
+		}
+		return r, nil
 	case "completed":
-		if !one(r.Operation, "execute", "status") || r.Completion == nil || !validCompletion(*r.Completion) {
+		if !one(r.Operation, "execute", "status", "finish") || r.Completion == nil || !validCompletion(*r.Completion) {
 			return Response{}, ErrInvalid
 		}
 		p = &r.Completion.Source
@@ -243,7 +260,7 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 	}
 	if p != nil {
 		h, e := BindingDigest(p.Binding)
-		if !validPrepared(*p) || e != nil || h != p.BindingSHA256 || !reflect.DeepEqual(p.Binding.Identity, *r.Identity) || p.Binding.HostID != r.Target.HostID || p.Binding.WorkerSHA256 != r.Target.WorkerSHA256 || (request.Operation == "execute" && request.BindingSHA256 != p.BindingSHA256) {
+		if !validPrepared(*p) || e != nil || h != p.BindingSHA256 || !reflect.DeepEqual(p.Binding.Identity, *r.Identity) || p.Binding.HostID != r.Target.HostID || p.Binding.WorkerSHA256 != r.Target.WorkerSHA256 || (one(request.Operation, "execute", "finish") && request.BindingSHA256 != p.BindingSHA256) {
 			return Response{}, ErrInvalid
 		}
 	}

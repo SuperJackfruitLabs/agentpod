@@ -5,7 +5,7 @@
 
 import { CARD_PROMPT_VERSION, CardPrompt, CardPromptComment, type AcpMcpServer } from "@agentpod/contract";
 import { fetchRelatedWork, prefetchRelatedWork, relatedBasis, relatedWorkEnabled } from "../superlibrary";
-import type { DispatchDeps } from "./dispatch-types";
+import type { AcpPort, DispatchDeps } from "./dispatch-types";
 import type { ClaimedWork, RunContext } from "./superpipeline";
 
 /**
@@ -100,7 +100,7 @@ function promptComments(ctx: RunContext): { comments?: CardPromptComment[]; comm
  * which can drive a run and cannot claim one; the roster token, which can, is
  * the hub's alone and does not leave this process.
  */
-export function boardTools(deps: DispatchDeps): AcpMcpServer[] | null {
+export function boardTools(deps: Pick<DispatchDeps, "agent" | "mcpUrl">): AcpMcpServer[] | null {
   const token = deps.agent.mcpToken;
   if (!token || !deps.mcpUrl) return null;
   return [
@@ -111,6 +111,27 @@ export function boardTools(deps: DispatchDeps): AcpMcpServer[] | null {
       headers: [{ name: "Authorization", value: `Bearer ${token}` }],
     },
   ];
+}
+
+/**
+ * The session a claimed run's work opens on the agent's station: its board tools, the node's MCP
+ * proxy, and the run it works for. Shared by an ordinary claim (`workClaimed`) and a remote bench
+ * stage's turn (checkpoint-remote-turn.ts), so both open the same session.
+ */
+export function claimedSessionInput(deps: Pick<DispatchDeps, "agent" | "mcpUrl" | "tenantId">, run: { runId: string; leaseEpoch: number },
+  validateExecutionRun: () => Promise<unknown>): Parameters<AcpPort["createSession"]>[0] {
+  const { agent, tenantId } = deps;
+  const tools = boardTools(deps);
+  return {
+    stationId: agent.stationId,
+    tenantId,
+    userId: agent.hubUserId,
+    mode: agent.mode,
+    ...(tools ? { mcpServers: tools } : {}),
+    mcpProxy: true,
+    executionRun: { source: 'superpipeline', id: run.runId, epoch: run.leaseEpoch },
+    validateExecutionRun,
+  };
 }
 
 /**

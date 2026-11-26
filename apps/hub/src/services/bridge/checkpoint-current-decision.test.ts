@@ -1,12 +1,15 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { failedDecision, finalRowDecision } from "./checkpoint-current-decision";
+import { checkpointCurrentDecision, failedDecision, finalRowDecision } from "./checkpoint-current-decision";
 
 function row(): RetainedCheckpointAttempt["row"] {
   return { tenantId: "tenant", boardId: "brd_ABC123", runId: "run_ABC123", leaseEpoch: 7, attemptId: "attempt-fixture",
     profile: "{}", claim: "{}", authority: "authority-1", prepareRequest: "{}", prepareSHA256: "e".repeat(64), phase: "execute_pending",
     prepared: null, source: null, sourceReceipt: null, executeRequest: null, executeSHA256: null, completion: null,
-    settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, createdAt: new Date(0), updatedAt: new Date(0) };
+    settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, remote: null, createdAt: new Date(0), updatedAt: new Date(0) };
 }
 
 test("an unchanged row stays current", () => {
@@ -41,4 +44,21 @@ test("a failed decision stays unavailable when the board says the run is live, c
   let asked = false;
   expect(await failedDecision("node", undefined, async () => { asked = true; return true; })).toBe("unavailable");
   expect(asked).toBe(false);
+});
+
+// A remote stage's attach and finish are decided as execute is (checkpoint-remote-state.ts): an
+// attempt the hub does not hold is never current, and the board is not asked about it.
+const nodeOf = (value: unknown) => z.object({ identity: z.object({ node_id: z.string() }) }).parse(value).identity.node_id;
+test("a remote attach or finish check for an attempt the hub does not hold is never current", async () => {
+  const corpus = z.object({ requests: z.array(z.object({ name: z.string(), value: z.unknown() })) }).parse(JSON.parse(readFileSync(join(import.meta.dir,
+    "../../../../../packages/contract/src/fixtures/bench-coordinator-current-v1.json"), "utf8")));
+  for (const name of ["remote attach", "remote finish"]) {
+    const value = corpus.requests.find((c) => c.name === name)?.value;
+    if (!value) throw new Error(`fixture ${name} missing`);
+    const decision = await checkpointCurrentDecision(nodeOf(value), new TextEncoder().encode(JSON.stringify(value)),
+      async () => { throw new Error("the board is not asked"); });
+    expect(decision.decision).toBe("refused");
+    // No row: `stale_owner` with a database (every CI run has one), `unavailable` when there is none to read.
+    expect("code" in decision ? decision.code : "").toBe(process.env.DATABASE_URL ? "stale_owner" : "unavailable");
+  }
 });

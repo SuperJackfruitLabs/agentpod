@@ -27,6 +27,7 @@ import { createLogger } from "../../utils/logger";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { CHECKPOINT_TERMINAL_PHASES, checkedCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { reclaimCardBench, stageKeepsBench, type ReclaimOutcome, type ReclaimTarget } from "./checkpoint-reclaim";
+import { sweepRemoteDetach } from "./checkpoint-remote-sweep";
 import { SuperpipelineApiError } from "./superpipeline";
 
 const log = createLogger("bench-clearing");
@@ -247,13 +248,17 @@ export function clearingDeps(): ClearingDeps {
     reclaim: (target, reason) => reclaimCardBench(target, reason), record, now: Date.now, dormantMs: dormantAfterMs() };
 }
 
-/** Start the sweep: the first one an interval after start, so nodes have reconnected. */
+/**
+ * Start the sweep: the first one an interval after start, so nodes have reconnected. The same timer
+ * asks the agent's node again for every ended remote bench stage whose detach never confirmed
+ * (checkpoint-remote-sweep.ts).
+ */
 export function startBenchClearing(intervalMs = CLEARING_INTERVAL_MS): { stop(): void } {
   let running = false;
   const timer = setInterval(() => {
     if (running) return;
     running = true;
-    void sweepBenchClearing(clearingDeps()).finally(() => { running = false; });
+    void Promise.allSettled([sweepBenchClearing(clearingDeps()), sweepRemoteDetach()]).finally(() => { running = false; });
   }, intervalMs);
   timer.unref?.();
   return { stop: () => clearInterval(timer) };

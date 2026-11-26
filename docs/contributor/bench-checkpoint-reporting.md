@@ -527,6 +527,14 @@ lets the change make it disappear; it is resolved, with evidence, as follows.
   `GET /api/admin/checkpoint/attempts` and
   `POST /api/admin/checkpoint/attempts/:attemptId/settle` with
   `{"confirm": "<attempt id>", "evidence": "…"}`.
+- **An owner or admin confirms a remote attempt's detach by hand.** An ended remote
+  attempt keeps its station busy until the station's node confirms the detach; a node
+  that refuses it every time never does. Once the operator has restored the station's
+  terminal on its node, `fleet bridge checkpoint-detached ATTEMPT --evidence "…"`
+  (`POST /api/admin/checkpoint/attempts/:attemptId/detached`, same body) records the
+  detach as confirmed, which frees the station. It asks no node, is audited
+  (`checkpoint_attempt_detach_confirm`), and is refused 409 while the attempt is in
+  progress (`in_progress`) or when its station is not attached (`not_attached`).
 - **Nothing is deleted.** `retired` and `reported` are terminal, a retirement can
   never change, and every evidence cell the attempt already held stays as it was.
 
@@ -616,3 +624,67 @@ every other retained field, and the authorization snapshot digest recomputed
 over it, must be exactly equal. The pins the Hub reads anyway (board, station,
 enabled row, profile) still hold. Only a mode or credential-source edit goes
 undetected for these older attempts.
+
+## Remote stages (`remote-v1`)
+
+A stage set `--execution remote` keeps the same claim, prepare, source admission and
+settlement as a one-shot stage. Only the part between admission and the completed
+observation changes. There is no `execute_pending` and no `execute_request`: a row
+holds `remote` or `execute_request`, never both, and `remote` is never cleared once
+set.
+
+| Phase | What the hub does | Leaves for |
+| --- | --- | --- |
+| `attach_pending` | Asks the station's node for its public key (`bench.identity.ensure`). Retains the attach request's SHA-256 and the key's fingerprint, then sends `attach` to the bench host's node, then `bench.remote.attach` to the station's node with only the inner credential. | `working`, or `failure_pending` on a definite refusal |
+| `working` | Opens a fresh ACP session in the workspace root after the attach, and runs one turn. Renews the certificate (same key, same bytes) when less than ten minutes remain. Heartbeats only while the turn is alive and the station's node reports the attachment. | `finish_pending` at the agent's end of turn |
+| `finish_pending` | Sends `finish` with the agent's report. A `dirty` answer returns to `working`: re-attach, then a fresh session, at most twice. | `completed`, `working` (dirty), `failure_pending` |
+
+From `completed` the settlement is the one-shot path's:
+
+- `execution.id` is SuperBench's remote execution on the lease, as the bench host's node last
+  saw it after issuing a certificate. benchd starts a new one after a restart or a fenced
+  checkpoint.
+- `workerResultSha256` is the SHA-256 of the canonical report bytes (`handoff` and `outcome`) the
+  node journaled before its finishing checkpoint.
+- The checkpoint members are that finishing checkpoint's commits.
+
+The hub's current decision accepts `attach` only in `attach_pending` or `working`, and only for
+the retained attach bytes. It accepts `finish` only in `finish_pending`, and only for the
+retained finish bytes, whose identity, target and binding are the attempt's.
+
+### When a remote attempt fails or its run ends
+
+The failure is often the station's node's or the hub's (an attach refused for
+`credential_files`, the dirty-tree limit, a lost turn, the turn bound), so the bench host's node
+would not otherwise hear of it.
+
+- **A failure** (`failure_pending`): the bench host's node is told with one `status` while the
+  run is still the hub's, before the board's `fail`.
+- **A run the board ended** (in any remote phase): the node is told after the hub reads the run
+  view.
+- **The decision:** for a remote attempt, the hub's current decision answers `stale_owner` once
+  the attempt is `failure_pending` or `failed`, or for an `observe` whose run the board ended. The
+  node then retires its record.
+- **Retiring a record** (operator ruling, 2026-11-26):
+  - The node reads the lease first. A lease that is stopped, not this record's, or carries a
+    pending checkpoint is never checkpointed: benchd would refuse the payload's Git part way and
+    leave the checkpoint pending, which `renew_admin` then refuses.
+  - A clean tree is checkpointed with the record's own token, so the agent's commits are kept.
+    The lease is then stopped and released, and the record stays refused.
+  - A dirty tree is held. benchd fenced the sessions when it looked, the lease stays held and
+    unstopped, and the node's status carries `detail.lease: "held"` with SuperBench's message. The
+    refusal is not replayed, so a later status checkpoints again once the tree is clean, and finds
+    a lease an operator released gone.
+- **A held bench:**
+  - The attempt parks `remote.held_dirty` (`remote.lease_held` for another held refusal) and keeps
+    its station busy. `failure_pending` is a holding phase for a remote profile.
+  - The hub says `checkpoint.parked` (`lease_held`) once per hub process (the dedupe is in memory,
+    so a restart can say it again), with the operator's steps, and warns.
+  - It is never timed out. `run_ended.unconfirmed` applies only to a node that does not answer.
+  - Once the node's status is terminal, the failure closes `failed` (or the attempt retires
+    `run_ended`) and the station is free.
+- **Null fields:** a failure that closes `run_ended` leaves the board's null fields (an ended
+  run's `cardRunId`) out of its canonical report.
+
+The operator's steps are in [Remote bench stages](../../docs-site/src/content/docs/use/remote-bench-stages.md).
+A SuperBench release that discards a dirty tree to its last checkpoint is **not built yet**.

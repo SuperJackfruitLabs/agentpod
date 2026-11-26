@@ -54,14 +54,10 @@ export async function reconcileOnBoot(): Promise<void> {
       continue;
     }
     if (nodeId && connectionManager.isOnline(nodeId)) {
-      // Best-effort: broker.request never rejects; result is ignored.
-      void broker.request(nodeId, "acp.close", {
-        sessionId: row.nodeSessionId,
-      });
-      await db
-        .update(acpSessions)
-        .set({ nodeSessionId: null })
-        .where(eq(acpSessions.id, row.id));
+      // Not awaited, so boot never waits on a node. The marker is cleared only once the node
+      // confirms the close: a close that was lost keeps it, and the node-online hook closes it
+      // again (a remote bench stage resumes only once its station's processes are confirmed closed).
+      void closeAndClear(nodeId, row.id, row.nodeSessionId);
     } else {
       // Kept as an orphan marker (non-null node_session_id on an ended row):
       // the node-online hook below closes it when the node next connects.
@@ -77,6 +73,19 @@ export async function reconcileOnBoot(): Promise<void> {
     log.info(
       `ACP reconcile: ended ${stale.length} stale session(s) from before restart`,
     );
+  }
+}
+
+/** One boot-time close; the row's marker is cleared only on the node's ok. Never throws. */
+async function closeAndClear(nodeId: string, sessionId: string, nodeSessionId: string): Promise<void> {
+  try {
+    const closed = await broker.request(nodeId, "acp.close", { sessionId: nodeSessionId });
+    if (!closed.ok) return;
+    await db.update(acpSessions).set({ nodeSessionId: null })
+      .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.nodeSessionId, nodeSessionId)));
+  } catch (error) {
+    log.warn("ACP reconcile: an orphan's marker could not be cleared", { sessionId,
+      error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -119,10 +128,15 @@ export async function closeOrphanedProcesses(nodeId: string): Promise<void> {
       });
       continue;
     }
-    // Best-effort: broker.request never rejects; result is ignored.
-    void broker.request(nodeId, "acp.close", {
+    // The marker is cleared only once the node confirms the close; a lost close keeps it for the next connect.
+    const closed = await broker.request(nodeId, "acp.close", {
       sessionId: orphan.nodeSessionId!,
     });
+    if (!closed.ok) {
+      log.warn("ACP orphan cleanup: the node did not confirm the close; the marker stays", {
+        sessionId: orphan.id, nodeId, nodeSessionId: orphan.nodeSessionId, error: closed.error });
+      continue;
+    }
     await db
       .update(acpSessions)
       .set({ nodeSessionId: null })

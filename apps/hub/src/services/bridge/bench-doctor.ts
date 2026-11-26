@@ -15,7 +15,7 @@ import { stations } from "../../db/schema/stations";
 import { tenants } from "../../db/schema/tenants";
 import { tenantScope } from "../../db/tenant-scope";
 import { CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
-import { normalizeRosterProfileKey, type CheckpointProfile } from "./checkpoint-profile";
+import { isRemoteProfile, normalizeRosterProfileKey, type CheckpointProfile } from "./checkpoint-profile";
 import { deploymentSuperpipelineAudience, parseDeploymentCredentialSource } from "./credential-audience";
 import { checkBridgeDispatchGrant } from "./dispatch-grant";
 import { trialAgentGrant } from "./roster";
@@ -76,10 +76,12 @@ export async function benchDoctor(tenantId: string, q: { name?: string; stationI
   if (!s) return null;
   add("station: occupant", s.principalId !== null, s.principalId ? `occupied by ${s.principalId}` : "the station has no occupant",
     "Create the agent principal in the Accounts console, then staff the station with it (fleet staff).");
-  const [n] = await db.select().from(nodes).where(eq(nodes.id, s.nodeId));
+  // A remote stage's registry is on its bench node, not the station's.
+  const benchNode = profile && isRemoteProfile(profile) ? profile.target.node_id : s.nodeId;
+  const [n] = await db.select().from(nodes).where(eq(nodes.id, benchNode));
   const online = n?.status === "online";
-  add("node: online", online, online ? `${s.nodeId} is online` : `${s.nodeId} is ${n?.status ?? "unknown"}`, "Start the node (apn start on the bench host).");
-  const answer = await nodeRegistryStatus(s.nodeId);
+  add("node: online", online, online ? `${benchNode} is online` : `${benchNode} is ${n?.status ?? "unknown"}`, "Start the node (apn start on the bench host).");
+  const answer = await nodeRegistryStatus(benchNode);
   let registry: BenchRegistryStatus | undefined;
   if (!answer.ok) add("node: registry verbs", false, answer.error, answer.error.includes("update it") ? "fleet nodes update" : undefined);
   else {

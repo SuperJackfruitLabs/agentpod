@@ -28,12 +28,16 @@ func TestAdminVerbsUseTheHubRoutes(t *testing.T) {
 		{"bridge rm", []string{"bridge", "rm", "k"}, "DELETE", "/api/admin/bridge/agents/k"},
 		{"bridge checkpoint-attempts", []string{"bridge", "checkpoint-attempts"}, "GET", "/api/admin/checkpoint/attempts"},
 		{"bridge checkpoint-settle", []string{"bridge", "checkpoint-settle", "attempt_1", "--evidence", "node journal shows the record cancelled"}, "POST", "/api/admin/checkpoint/attempts/attempt_1/settle"},
+		{"bridge checkpoint-detached", []string{"bridge", "checkpoint-detached", "attempt_1", "--evidence", "restored the terminal on the node by hand"}, "POST", "/api/admin/checkpoint/attempts/attempt_1/detached"},
 
 		// bench stages and the doctor
 		{"bench stage list", []string{"bench", "stage", "list"}, "GET", "/api/admin/bench/stages"},
 		{"bench stage add", []string{"bench", "stage", "add", "review", "--board", "brd_1", "--station", "st_1", "--agent", "agt_1",
 			"--repo", "name=app,provider=forge,repository=o/app,clone=ssh://git@forge.test/o/app.git", "--checkpoint-repo", "app",
 			"--worker", "/usr/libexec/w"}, "POST", "/api/admin/bench/stages"},
+		{"bench stage add remote", []string{"bench", "stage", "add", "review", "--board", "brd_1", "--station", "st_1", "--agent", "agt_1",
+			"--repo", "name=app,provider=forge,repository=o/app,clone=ssh://git@forge.test/o/app.git", "--checkpoint-repo", "app",
+			"--execution", "remote", "--bench-node", "node_x"}, "POST", "/api/admin/bench/stages"},
 		{"bench stage set", []string{"bench", "stage", "set", "review", "--board", "brd_2"}, "PATCH", "/api/admin/bench/stages/review"},
 		{"bench stage rm", []string{"bench", "stage", "rm", "review"}, "DELETE", "/api/admin/bench/stages/review"},
 		{"bench doctor", []string{"bench", "doctor", "review"}, "GET", "/api/admin/bench/doctor"},
@@ -389,6 +393,10 @@ func TestBridgeCheckpointSettleRefusesWithoutEvidence(t *testing.T) {
 		"no attempt":     {"bridge", "checkpoint-settle"},
 		"no evidence":    {"bridge", "checkpoint-settle", "attempt_1"},
 		"short evidence": {"bridge", "checkpoint-settle", "attempt_1", "--evidence", "looked"},
+		// The same for an operator's detach confirmation.
+		"detached, no attempt":     {"bridge", "checkpoint-detached"},
+		"detached, no evidence":    {"bridge", "checkpoint-detached", "attempt_1"},
+		"detached, short evidence": {"bridge", "checkpoint-detached", "attempt_1", "--evidence", "looked"},
 	} {
 		if _, code := run(t, bin, env, args...); code != 2 {
 			t.Errorf("%s: exit = %d, want 2", name, code)

@@ -49,6 +49,12 @@ export interface AcpPort {
     mode: AcpSessionMode;
     mcpServers?: AcpMcpServer[];
     mcpProxy?: boolean;
+    /** The session's working directory in place of the station's workspace (a remote bench stage). */
+    cwd?: string;
+    /** Checked under the station's session-open lock just before the open; a throw refuses it. */
+    admit?: () => Promise<void>;
+    /** Only a remote bench stage's own turn: the open is not refused for the hold that stage itself has. */
+    benchTurn?: true;
     executionRun?: SalaamRunAuthority;
     validateExecutionRun?: () => Promise<unknown>;
   }): Promise<{ id: string; libraryTools?: boolean }>;
@@ -57,7 +63,18 @@ export interface AcpPort {
   /** Before a strict re-drive: restore a session a hub restart left un-held; "waiting" while its node is offline. */
   ensureStrictSession?(userId: string, sessionId: string): Promise<"live" | "waiting" | "gone">;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
+  /**
+   * Run `fn` under the station's session-open lock, the one every session open takes: a remote bench
+   * stage attaches the station's terminal under it, so no session opens mid-attach.
+   */
+  withStationLock?<T>(stationId: string, fn: () => Promise<T>): Promise<T>;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
+  /**
+   * End every session on a station and confirm with its node that no agent process of theirs still
+   * runs (a remote bench stage before it opens a fresh session after a hub restart). False when that
+   * cannot be confirmed. Without it, such a stage opens nothing.
+   */
+  closeStationSessions?(input: { tenantId: string; stationId: string }, reason: string): Promise<boolean>;
   /**
    * Deliver a decision to the harness parked on `requestSeq`.
    *
@@ -80,6 +97,12 @@ export interface DispatchDeps {
   checkpoint?: CheckpointDispatchPort;
   /** Where a refused checkpoint selection is reported; rate-limited by the loop. Absent: `log`. */
   checkpointRefused?: CheckpointRefusalLog;
+  /**
+   * Whether a remote bench stage holds the station (checkpoint-remote.ts `stationBenchBusy`): its
+   * terminal points at a bench, so this cycle claims nothing, checkpoint or ordinary. The loop that
+   * owns the attempt still drives it, through its checkpoint recovery. Absent: never busy.
+   */
+  benchBusy?: () => Promise<boolean>;
   /** Test seam: settle a stopped strict run with its known effects preserved, only once Salaam's
    * status says it can prove them; throws otherwise. Defaults to salaam-dispatch's settlement. */
   settleStoppedWork?: (runId: string) => Promise<void>;
@@ -197,6 +220,9 @@ export type DispatchStatus =
   | "unanswered"
   /** The harness or the session failed. */
   | "failed";
+
+/** Why an ordinary session was refused: a remote bench stage holds the station. */
+export const STATION_HELD_MESSAGE = "a remote bench stage holds this station; the card is handed back";
 
 export interface DispatchResult {
   status: DispatchStatus;

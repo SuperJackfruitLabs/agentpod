@@ -78,6 +78,7 @@ const WORKSPACE_ADMIN_ROUTES: Array<[string, string, unknown?]> = [
   // Inspecting and settling checkpoint attempts is the workspace's, too.
   ["GET", "/api/admin/checkpoint/attempts"],
   ["POST", "/api/admin/checkpoint/attempts/attempt_wsa/settle", { confirm: "attempt_wsa", evidence: "fixture evidence of at least twenty" }],
+  ["POST", "/api/admin/checkpoint/attempts/attempt_wsa/detached", { confirm: "attempt_wsa", evidence: "fixture evidence of at least twenty" }],
   ["GET", "/api/nodes/telemetry"],
   ["POST", "/api/nodes/telemetry", { off: true }],
   ["POST", "/api/nodes/update-all", {}],

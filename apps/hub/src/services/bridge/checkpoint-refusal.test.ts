@@ -30,6 +30,7 @@ const RULING = {
   invalid: [undefined, undefined],
   unauthorized: [undefined, undefined],
   pending: [undefined, undefined],
+  dirty: [undefined, undefined],
 } as const;
 
 test.each(Object.entries(RULING))("refusal %s is ruled per phase", async (code, [prepare, execute]) => {

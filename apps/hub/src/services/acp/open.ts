@@ -18,7 +18,7 @@ import {
 import { gateCapability, getStation } from "../stations";
 import { finalizeEnd } from "./end";
 import { persistEvent, setStatus } from "./events";
-import { busyRefusal, interactiveWorkspaceAdmin, nodeHasCapability, stationReadiness } from "./gates";
+import { busyRefusal, interactiveWorkspaceAdmin, nodeHasCapability, refuseWhileInBench, stationReadiness } from "./gates";
 import { connectAndHandshake, proxyOptions } from "./handshake";
 import { log } from "./log";
 import { handleWireClosed } from "./recovery";
@@ -88,7 +88,21 @@ export async function createSession(
       ? await busyRefusal(readiness.holder, userId)
       : new Error(readiness.reason);
 
-  return withStationOpenLock(stationId, () => openSession(input));
+  return admitAndOpen(input, () => openSession(input));
+}
+
+/**
+ * Under the station's open lock, the one every open of this station takes: the bridge's admission
+ * (`admit`), then the remote bench stage's hold (`refuseWhileInBench`), then the open. A refusal opens
+ * nothing. Exported for tests.
+ */
+export function admitAndOpen<T>(input: Pick<CreateSessionInput, "stationId" | "tenantId" | "admit" | "benchTurn">,
+  open: () => Promise<T>): Promise<T> {
+  return withStationOpenLock(input.stationId, async () => {
+    await input.admit?.();
+    await refuseWhileInBench(input);
+    return open();
+  });
 }
 
 async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
@@ -130,7 +144,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     stationKey,
     harness,
     mode,
-    workspacePath: workspacePath ?? null,
+    workspacePath: input.cwd ?? workspacePath ?? null,
     mcpProxyRequested,
     mcpServers: input.mcpServers,
   });
@@ -378,7 +392,7 @@ export function isSessionNotResumable(e: unknown): e is SessionNotResumable {
  * end. Someone else's session is "not found", as on every other per-session door.
  */
 export async function resumeSession(
-  input: Omit<CreateSessionInput, "stationId" | "mode" | "resumeFrom" | "executionRun" | "validateExecutionRun"> & {
+  input: Omit<CreateSessionInput, "stationId" | "mode" | "resumeFrom" | "executionRun" | "validateExecutionRun" | "benchTurn"> & {
     sessionId: string;
     mode?: AcpSessionMode;
   },

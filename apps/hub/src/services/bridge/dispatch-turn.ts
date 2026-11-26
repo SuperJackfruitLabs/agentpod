@@ -399,6 +399,40 @@ function observeBackgroundWake(t: Turn, update: object): void {
   armBackgroundQuiet(t);
 }
 
+/** The work a turn's agent still has in flight: tool calls, and detached Hermes work they started. */
+export interface OwnWork {
+  pendingToolCalls: Set<string>;
+  backgroundWork: Map<string, string>;
+  pendingBackgroundWork: Set<string>;
+}
+
+/**
+ * One ACP update's effect on the agent's own work: a tool call pending or in progress is in flight
+ * until it completes, fails or is cancelled, and a completed terminal call that started detached
+ * Hermes work leaves that work pending until its wake. True when the update settled a tool call.
+ * The remote bench turn (checkpoint-remote-turn.ts) keeps the same accounting.
+ */
+export function observeOwnWork(own: OwnWork, update: object): boolean {
+  const kind = "sessionUpdate" in update ? update.sessionUpdate : undefined;
+  if (kind !== "tool_call" && kind !== "tool_call_update") return false;
+  const id = "toolCallId" in update && typeof update.toolCallId === "string" ? update.toolCallId : "";
+  const status = "status" in update && typeof update.status === "string" ? update.status : "";
+  if (id && (status === "pending" || status === "in_progress")) own.pendingToolCalls.add(id);
+  const settled = id !== "" && (status === "completed" || status === "failed" || status === "cancelled");
+  if (settled) own.pendingToolCalls.delete(id);
+  if (kind === "tool_call_update" && status === "completed" && id) {
+    const marker = backgroundMarker(update, id);
+    if (marker) {
+      own.backgroundWork.set(marker.key, marker.label);
+      own.pendingBackgroundWork.add(marker.key);
+    }
+  }
+  return settled;
+}
+
+/** Said to the agent when the work it waited on has finished. */
+export const OWN_WORK_FINISHED_PROMPT = "Your background work has finished. Continue from its results and finish the card.";
+
 function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   try {
     t.spans.onEvent(event);
@@ -414,26 +448,10 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   if (event.type === "agent-update" && typeof update === "object" && update !== null) {
     if (t.waitingOnBackgroundWork) observeBackgroundWake(t, update);
     else if ("messageId" in update && typeof update.messageId === "string") t.seenMessageIds.add(update.messageId);
-    const kind = "sessionUpdate" in update ? update.sessionUpdate : undefined;
-    if (kind === "tool_call" || kind === "tool_call_update") {
-      const id = "toolCallId" in update && typeof update.toolCallId === "string" ? update.toolCallId : "";
-      const status = "status" in update && typeof update.status === "string" ? update.status : "";
-      if (id && (status === "pending" || status === "in_progress")) t.pendingToolCalls.add(id);
-      if (id && (status === "completed" || status === "failed" || status === "cancelled")) {
-        t.pendingToolCalls.delete(id);
-        if (!t.waitingOnBackgroundWork && t.waitingOnOwnWork && t.pendingToolCalls.size === 0) {
-          t.waitingOnOwnWork = false;
-          queue(t, () => clearOwnWorkWait(t.key));
-          t.settle({ kind: "own-work-ready" });
-        }
-      }
-      if (kind === "tool_call_update" && status === "completed" && id) {
-        const marker = backgroundMarker(update, id);
-        if (marker) {
-          t.backgroundWork.set(marker.key, marker.label);
-          t.pendingBackgroundWork.add(marker.key);
-        }
-      }
+    if (observeOwnWork(t, update) && !t.waitingOnBackgroundWork && t.waitingOnOwnWork && t.pendingToolCalls.size === 0) {
+      t.waitingOnOwnWork = false;
+      queue(t, () => clearOwnWorkWait(t.key));
+      t.settle({ kind: "own-work-ready" });
     }
   }
 
@@ -664,7 +682,7 @@ export async function driveTurn(t: Turn, text: string): Promise<TurnEnd> {
         await deps.acp.promptSession(
           deps.agent.hubUserId,
           t.session.id,
-          "Your background work has finished. Continue from its results and finish the card.",
+          OWN_WORK_FINISHED_PROMPT,
           { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch },
         );
         continue;

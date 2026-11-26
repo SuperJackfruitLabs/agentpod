@@ -5,9 +5,11 @@
 export { buildAcpAgent } from "./agent";
 export {
   SESSION_BUSY_MESSAGE,
+  STATION_IN_BENCH_MESSAGE,
   answerPermission,
   cancelPermission,
   cancelTurn,
+  closeStationSessions,
   createSession,
   endSession,
   endSessionAsWorkspaceAdmin,
@@ -15,6 +17,7 @@ export {
   getSession,
   isSalaamStationBusy,
   isSessionNotResumable,
+  isStationInBench,
   listSessions,
   promptSession,
   readEvents,
@@ -25,6 +28,7 @@ export {
   sessionHasLibraryTools,
   sessionIsBusy,
   setMode,
+  setStationHold,
   stationReadiness,
   subscribe,
   whenIdle,
@@ -44,3 +48,4 @@ export {
 export type { HarnessPermissionSubject, PermissionMeaning, PermissionPreviewBlock, PermissionScope } from "./harness-permission";
 export { turnErrorCard } from "./turn-error";
 export { webSocketStream } from "./ws-stream";
+export { withStationOpenLock } from "./timing";

@@ -18,7 +18,7 @@
   "typescript(no-extraneous-class)": 2,
   "typescript(no-misused-spread)": 11,
   "typescript(no-non-null-asserted-optional-chain)": 1,
-  "typescript(no-non-null-assertion)": 2581,
+  "typescript(no-non-null-assertion)": 2580,
   "typescript(no-redundant-type-constituents)": 15,
   "typescript(no-unnecessary-boolean-literal-compare)": 11,
   "typescript(no-unnecessary-template-expression)": 1,

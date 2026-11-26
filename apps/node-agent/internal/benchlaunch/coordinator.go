@@ -165,6 +165,10 @@ type Coordinator struct {
 	// Current is the hub's fresh decision for this exact attempt. It is checked
 	// before every send and after every await; it is never cached.
 	Current benchdispatch.SourceGate
+	// Remote selects the remote launch (benchremote): Prepare stops after the
+	// baseline checkpoint and binds no run, Execute is unsupported, and a
+	// cleanup stops the lease before it releases it. See remote.go.
+	Remote bool
 }
 
 // ErrSuperseded is what Current returns when the hub has definitely decided

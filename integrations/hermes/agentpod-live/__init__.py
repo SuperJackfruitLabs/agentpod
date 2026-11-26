@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import posixpath
 import queue
 import re
 import socket
@@ -68,7 +69,7 @@ TOOL_UPDATE_TYPE = "dev.agentpod.tool.update"
 # Sent on every request. Not cosmetic: id.agentpod.dev sits behind Cloudflare,
 # which answers urllib's default `Python-urllib/3.x` with 403 (error 1010,
 # browser-signature ban). That cost the first live trial every event it sent.
-USER_AGENT = "agentpod-live/0.2.0 (Hermes plugin)"
+USER_AGENT = "agentpod-live/0.3.0 (Hermes plugin)"
 
 # Mirrors `live.ts`: a boundary with enough behind it goes at once; anything
 # else waits, until the backstop.
@@ -708,7 +709,173 @@ def _failed(status: Any, error_type: Any) -> bool:
     return bool(error_type) or str(status or "").lower() in ("error", "failed", "failure")
 
 
+# ─── Remote bench ────────────────────────────────────────────────────────────
+#
+# While the node has attached this profile to a remote bench (`apn`'s
+# `bench.remote.attach`), Hermes's terminal backend is SSH into the bench and
+# every file tool lands there. Two things need help from inside Hermes:
+#
+# - Replace-mode `patch` cannot work remotely. ACP edit approval builds its
+#   preview by reading the target from the gateway host's own disk
+#   (`acp_adapter/edit_approval.py` `_proposal_for_patch_replace`), finds
+#   nothing, and denies the edit. V4A `mode="patch"` previews from the patch
+#   text alone, and both are applied by the same `fuzzy_find_and_replace`
+#   (`file_operations.patch_replace` and `patch_parser._apply_update`), so a
+#   replace call is rewritten into the one-hunk V4A update that does the same
+#   thing. `pre_tool_call` runs before edit approval (`model_tools.py`
+#   `_pre_dispatch_guards`).
+# - The model is told where it is working, per session.
+#
+# The node writes the attach state to `<profile>/agentpod-bench.json` (0600,
+# no secrets) and removes it on detach. An expired or unreadable state counts
+# as not attached, and then every hook here is a no-op.
+
+BENCH_STATE_FILE = "agentpod-bench.json"
+BENCH_PROMPT_SECTION = "agentpod-remote-bench"
+
+_BENCH_ID = re.compile(r"^[a-f0-9]{32}$")
+_RFC3339_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+
+REPLACE_ALL_BLOCK = (
+    "This profile is attached to a remote bench, where replace-mode patch cannot run, and "
+    "replace_all has no V4A equivalent. Call patch with mode=\"patch\" and a V4A patch with one "
+    "hunk per occurrence (each with enough context to be unique), or write_file for a new file."
+)
+OUTSIDE_BLOCK = (
+    "This profile is attached to a remote bench, which exposes only {wd}. The path {path!r} is "
+    "not under it, so the edit was not made. Name a file under {wd}."
+)
+UNEXPRESSIBLE_BLOCK = (
+    "This profile is attached to a remote bench, where replace-mode patch cannot run, and this "
+    "edit cannot be converted to V4A ({why}). Call patch with mode=\"patch\" and a V4A patch, or "
+    "write_file for a new file."
+)
+
+
+def _hermes_home() -> str:
+    try:
+        from hermes_constants import get_hermes_home
+
+        return str(get_hermes_home())
+    except Exception:
+        return os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
+
+
+def read_bench_state(home: str, now: Optional[float] = None) -> Optional[Dict[str, str]]:
+    """The live attachment for the profile at *home*, or None (absent, malformed or expired)."""
+    try:
+        with open(os.path.join(home, BENCH_STATE_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("version") != 1:
+        return None
+    bench_id, work_dir, valid_before = data.get("bench_id"), data.get("working_directory"), data.get("valid_before")
+    if not (isinstance(bench_id, str) and _BENCH_ID.match(bench_id)):
+        return None
+    if not (isinstance(work_dir, str) and work_dir.startswith("/") and "\n" not in work_dir):
+        return None
+    if not (isinstance(valid_before, str) and _RFC3339_Z.match(valid_before)):
+        return None
+    try:
+        import calendar
+
+        expiry = calendar.timegm(time.strptime(valid_before[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return None
+    if (time.time() if now is None else now) >= expiry:
+        return None
+    return {"bench_id": bench_id, "working_directory": work_dir, "valid_before": valid_before}
+
+
+def bench_prompt(state: Optional[Dict[str, str]]) -> str:
+    if not state:
+        return ""
+    return (
+        f"You are working in remote bench {state['bench_id']} at {state['working_directory']}. "
+        "Your terminal and file tools run there, and every edit lands there, not on this host. "
+        "Edit existing files with patch; write_file is for new files."
+    )
+
+
+def bench_path(path: str, working_directory: str) -> Optional[str]:
+    """*path* as the bench sees it, resolved lexically against *working_directory* with ``..``
+    normalised, or None when it is not under *working_directory*. ``~`` is refused rather than
+    expanded: the gateway's home is not the bench's."""
+    if path.startswith("~"):
+        return None
+    root = posixpath.normpath(working_directory)
+    full = posixpath.normpath(path if path.startswith("/") else posixpath.join(root, path))
+    if full == root or full.startswith(root.rstrip("/") + "/"):
+        return full
+    return None
+
+
+def replace_patch_as_v4a(args: Any, working_directory: str) -> Optional[Dict[str, Any]]:
+    """The `pre_tool_call` directive for a replace-mode `patch` call, or None to leave it alone.
+
+    One V4A update hunk whose removed lines are old_string and whose added lines are new_string
+    searches for exactly old_string and replaces it with exactly new_string: the parser joins a
+    hunk's lines back with newlines and applies them with the same fuzzy matcher replace mode
+    uses, uniqueness rule included. What V4A cannot say is blocked with a message that steers the
+    model to V4A, never passed on to fail at edit approval. Only a path under the bench's working
+    directory is rewritten, and the V4A header names it resolved; any other path is blocked.
+    """
+    if not isinstance(args, dict) or (args.get("mode") or "replace") != "replace":
+        return None
+    path, old, new = args.get("path"), args.get("old_string"), args.get("new_string")
+    if not (isinstance(path, str) and path and isinstance(old, str) and isinstance(new, str)):
+        return None  # Hermes's own argument errors are clearer than ours.
+    if path != path.strip() or any(c in path for c in "\r\n"):
+        why = "the path has surrounding whitespace or a line break"
+        return {"action": "block", "message": UNEXPRESSIBLE_BLOCK.format(why=why)}
+    resolved = bench_path(path, working_directory)
+    if resolved is None:
+        return {"action": "block", "message": OUTSIDE_BLOCK.format(wd=working_directory, path=path)}
+    if args.get("replace_all"):
+        return {"action": "block", "message": REPLACE_ALL_BLOCK}
+    why = ""
+    if old == "":
+        why = "old_string is empty"
+    elif "\r" in old or "\r" in new:
+        why = "the text contains a carriage return, which the V4A parser strips"
+    if why:
+        return {"action": "block", "message": UNEXPRESSIBLE_BLOCK.format(why=why)}
+    lines = ["*** Begin Patch", f"*** Update File: {resolved}"]
+    lines += ["-" + line for line in old.split("\n")]
+    lines += ["+" + line for line in new.split("\n")]
+    lines.append("*** End Patch")
+    return {"action": "modify", "args": {"mode": "patch", "patch": "\n".join(lines)}}
+
+
+def register_bench(ctx: Any, home: Callable[[], str] = _hermes_home) -> None:
+    """The remote-bench hooks. Registered whatever else is configured: they cost nothing until
+    the node attaches the profile."""
+
+    def pre_tool_call(tool_name: str = "", args: Any = None, **_: Any):
+        if tool_name != "patch":
+            return None
+        state = read_bench_state(home())
+        if state is None:
+            return None
+        return replace_patch_as_v4a(args, state["working_directory"])
+
+    def section(_info: Any = None) -> str:
+        return bench_prompt(read_bench_state(home()))
+
+    ctx.register_hook("pre_tool_call", pre_tool_call)
+    if not hasattr(ctx, "register_system_prompt_section"):
+        logger.info("agentpod-live: this Hermes has no plugin prompt sections; the bench note is not added")
+        return
+    try:
+        ctx.register_system_prompt_section(BENCH_PROMPT_SECTION, section)
+    except (TypeError, ValueError) as exc:
+        # Never at the cost of the rest of the plugin.
+        logger.warning("agentpod-live: could not register the bench prompt section: %s", exc)
+
+
 def register(ctx: Any) -> None:
+    register_bench(ctx)
     homeserver = os.environ.get("MATRIX_HOMESERVER", "")
     token = os.environ.get("MATRIX_ACCESS_TOKEN", "")
     if not homeserver or not token:

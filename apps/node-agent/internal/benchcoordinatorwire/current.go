@@ -36,12 +36,14 @@ type CurrentResponse struct {
 func ParseCurrentRequest(raw []byte) (CurrentRequest, error) {
 	var r CurrentRequest
 	if decode(raw, MaxRequest, &r) != nil || r.Version != CurrentVersion ||
-		!one(r.Phase, "prepare", "execute", "observe") || !bidPattern.MatchString(r.Nonce) ||
+		!one(r.Phase, "prepare", "execute", "observe", "attach", "finish") || !bidPattern.MatchString(r.Nonce) ||
 		!matched(r.Identity, r.Target) || !ids(r.ProfileID) || !hashes(r.PrepareRequestSHA256) ||
 		r.BindingSHA256 != "" && !hashes(r.BindingSHA256) || r.SourceDigest != "" && !hashes(r.SourceDigest) ||
 		r.ExecuteRequestSHA256 != "" && !hashes(r.ExecuteRequestSHA256) ||
 		r.SourceDigest != "" && r.BindingSHA256 == "" ||
-		r.Phase == "execute" && (r.BindingSHA256 == "" || r.SourceDigest == "" || r.ExecuteRequestSHA256 == "") {
+		r.Phase == "execute" && (r.BindingSHA256 == "" || r.SourceDigest == "" || r.ExecuteRequestSHA256 == "") ||
+		// A remote attach or finish: its binding and its own exact request bytes, and no source receipt.
+		one(r.Phase, "attach", "finish") && (r.BindingSHA256 == "" || r.ExecuteRequestSHA256 == "" || r.SourceDigest != "") {
 		return CurrentRequest{}, ErrInvalid
 	}
 	return r, nil

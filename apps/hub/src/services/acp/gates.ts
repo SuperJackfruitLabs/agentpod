@@ -59,6 +59,47 @@ export async function busyRefusal(holder: SalaamStationHolder, callerId: string)
 }
 
 /**
+ * The refusal while a remote bench stage holds the station: from its claim until its finish, and
+ * whatever its phase while the agent's node may still point the station's terminal at the card's
+ * bench. A Hermes session reads its terminal when it opens, so any session opened then would work in
+ * that bench beside the stage's own agent: a Console chat, a Matrix room's session, an editor's.
+ */
+export const STATION_IN_BENCH_MESSAGE = "This station is working in a card's bench; try again when the stage finishes.";
+
+export class StationInBench extends Error {
+  override name = "StationInBench";
+  readonly code = "station_in_bench";
+  constructor() { super(STATION_IN_BENCH_MESSAGE); }
+}
+
+export function isStationInBench(e: unknown): e is StationInBench {
+  return e instanceof StationInBench || (e instanceof Error && e.name === "StationInBench");
+}
+
+/** Whether a remote bench stage holds a station. A throw refuses the open too. */
+export type StationHold = (tenantId: string, stationId: string) => Promise<boolean>;
+
+let stationHold: StationHold | undefined;
+
+/**
+ * Install the bridge's check (`stationBenchBusy`), from the composition root: the bridge sits above
+ * this module, so it is injected rather than imported. Every session open then asks it under the
+ * station's open lock. `undefined` removes it (tests).
+ */
+export function setStationHold(check: StationHold | undefined): void {
+  stationHold = check;
+}
+
+/**
+ * Refuse an open while a remote bench stage holds the station, unless it is that stage's own turn
+ * (`benchTurn`, a trusted bridge field). Called under the station's open lock.
+ */
+export async function refuseWhileInBench(input: Pick<CreateSessionInput, "tenantId" | "stationId" | "benchTurn">): Promise<void> {
+  if (input.benchTurn === true || !stationHold) return;
+  if (await stationHold(input.tenantId, input.stationId)) throw new StationInBench();
+}
+
+/**
  * Can a session be opened on this station at all?
  *
  * The same three gates `createSession` fails fast on, asked without opening

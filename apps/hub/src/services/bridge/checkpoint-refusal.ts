@@ -50,6 +50,9 @@ export const CHECKPOINT_REFUSAL_RULINGS: Readonly<Record<RefusalCode, Readonly<R
   invalid: { prepare_pending: "parked", execute_pending: "parked" },
   unauthorized: { prepare_pending: "parked", execute_pending: "parked" },
   pending: { prepare_pending: "parked", execute_pending: "parked" },
+  // Only a remote finish says it (uncommitted or untracked files; the lease is kept): never a reply to
+  // prepare or execute, so parked here. The remote phases rule on it themselves.
+  dirty: { prepare_pending: "parked", execute_pending: "parked" },
 };
 
 export interface CheckpointRefusalRuling {

@@ -66,7 +66,7 @@ import {
 } from "./voice";
 import { MAX_VOICE_SECONDS, type Transcriber } from "../speech";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
-import { SESSION_BUSY_MESSAGE } from "../acp";
+import { SESSION_BUSY_MESSAGE, STATION_IN_BENCH_MESSAGE, isStationInBench } from "../acp";
 
 const log = createLogger("matrix-inbound");
 
@@ -944,6 +944,11 @@ async function dispatchTurn(
     // Lost the race between the check above and the prompt: another message
     // started a turn in between. Waiting is still the answer.
     if (reason === SESSION_BUSY_MESSAGE) return "busy";
+    // A remote bench stage holds the station: not a failure to reach it, and nothing to wait on.
+    if (isStationInBench(err)) {
+      await notice(deps, agentUser, room.roomId, STATION_IN_BENCH_MESSAGE);
+      return "sent";
+    }
     log.error("matrix message could not reach the station", {
       room: room.roomId,
       stationKey: room.stationKey,

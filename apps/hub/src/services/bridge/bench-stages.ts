@@ -14,6 +14,10 @@
  * An attempt already running keeps its retained authority; a changed pin retires it through the
  * existing `authority.changed` / `stale_owner` paths.
  *
+ * A stage's execution is `one-shot` (the bench host's node runs the stage's worker as one task) or
+ * `remote` (the station's agent works in the card's bench from its own node). A remote stage's
+ * registry profile lives on its bench node (`benchNodeId`, launch `remote-v1`), not the station's.
+ *
  * A node's registry digest covers every profile it serves, so a write changes the target of each
  * stage on that node. Every other stage row on the node is re-pinned to the node's new target in
  * the same write, and a profile still coming from the legacy file is adopted into the table then.
@@ -28,9 +32,11 @@ import type {
   BenchStageView,
   BenchStageWorker,
 } from "@agentpod/contract";
+import { NodeCapability } from "@agentpod/contract";
 
 import { db } from "../../db/drizzle";
 import { bridgeAgents } from "../../db/schema/bridge";
+import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { tenants } from "../../db/schema/tenants";
 import { tenantScope } from "../../db/tenant-scope";
@@ -38,7 +44,7 @@ import { recordAudit } from "../audit";
 import { deploymentSuperpipelineAudience } from "./credential-audience";
 import { ensureBridgeDispatchGrant } from "./dispatch-grant";
 import { createBridgeAgent, updateBridgeAgent } from "./roster";
-import { CheckpointRefused, normalizeRosterProfileKey, parseCheckpointProfile, type CheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, isRemoteProfile, normalizeRosterProfileKey, parseCheckpointProfile, type CheckpointProfile } from "./checkpoint-profile";
 import { installedFileCheckpointProfiles } from "./checkpoint-profiles";
 import { nodeRegistryRemove, nodeRegistrySet, nodeRegistryStatus, type NodeAnswer, type NodeProfileChange } from "./bench-node";
 import { deleteStage, readStage, readStages, reloadStageProfiles, serialised, upsertStage, type StoredStage } from "./bench-stage-store";
@@ -49,22 +55,22 @@ export interface StageResult {
   body: Record<string, unknown>;
 }
 
-/** A refusal with an operator sentence, raised before anything is written. */
+/** A refusal with an operator sentence, and for some a fixed `code`, raised before anything is written. */
 class StageRefusal extends Error {
-  constructor(readonly status: 400 | 404 | 409 | 502, message: string) {
+  constructor(readonly status: 400 | 404 | 409 | 502, message: string, readonly code?: string) {
     super(message);
   }
 }
 
-const refuse = (status: 400 | 404 | 409 | 502, message: string): never => {
-  throw new StageRefusal(status, message);
+const refuse = (status: 400 | 404 | 409 | 502, message: string, code?: string): never => {
+  throw new StageRefusal(status, message, code);
 };
 
 async function guarded(work: () => Promise<StageResult>): Promise<StageResult> {
   try {
     return await serialised(work);
   } catch (error) {
-    if (error instanceof StageRefusal) return { status: error.status, body: { error: error.message } };
+    if (error instanceof StageRefusal) return { status: error.status, body: { error: error.message, ...(error.code ? { code: error.code } : {}) } };
     throw error;
   }
 }
@@ -73,6 +79,7 @@ async function guarded(work: () => Promise<StageResult>): Promise<StageResult> {
 
 interface StationFacts {
   id: string; nodeId: string; stationKey: string; principalId: string; ownerPrincipalId: string; occupancyEpoch: number;
+  harness: string;
 }
 
 async function stationFacts(tenantId: string, stationId: string): Promise<StationFacts> {
@@ -81,7 +88,42 @@ async function stationFacts(tenantId: string, stationId: string): Promise<Statio
   if (!s.principalId)
     return refuse(409, "the station has no occupant: staff it with its agent principal first (fleet staff), then add the stage");
   return { id: s.id, nodeId: s.nodeId, stationKey: s.stationKey, principalId: s.principalId, ownerPrincipalId: s.userId,
-    occupancyEpoch: s.occupancyEpoch };
+    occupancyEpoch: s.occupancyEpoch, harness: s.harness };
+}
+
+// ─── where the stage runs ────────────────────────────────────────────────────
+
+/** Advertised by a bench host's node that can issue remote bench credentials (launch `remote-v1`). */
+const BENCH_REMOTE_CREDENTIAL = NodeCapability.enum["bench.remote.credential"];
+/** Advertised by an agent's node that can point its station's harness at a remote bench. */
+// Typed, so a name the contract's NodeCapability does not know fails to compile.
+const BENCH_REMOTE_ATTACH: NodeCapability = "bench.remote.attach";
+
+interface Placement {
+  /** The node that serves the stage's registry profile: the station's own, or a remote stage's bench node. */
+  registryNode: string;
+  executor?: NonNullable<CheckpointProfile["executor"]>;
+}
+
+async function capabilitiesOf(tenantId: string, nodeId: string): Promise<string[] | undefined> {
+  const [n] = await db.select({ capabilities: nodes.capabilities }).from(nodes)
+    .where(and(eq(nodes.tenantId, tenantId), eq(nodes.id, nodeId)));
+  return n ? (Array.isArray(n.capabilities) ? n.capabilities : []) : undefined;
+}
+
+/** A one-shot stage runs on its station's node; a remote one is refused unless both nodes and the harness can do it. */
+async function placementFor(tenantId: string, station: StationFacts, benchNodeId: string | undefined): Promise<Placement> {
+  if (benchNodeId === undefined) return { registryNode: station.nodeId };
+  const bench = await capabilitiesOf(tenantId, benchNodeId) ?? refuse(404, `no node ${benchNodeId} in this workspace`);
+  if (!bench.includes(BENCH_REMOTE_CREDENTIAL))
+    refuse(409, `the bench node ${benchNodeId} cannot issue remote bench credentials (it does not advertise ` +
+      `${BENCH_REMOTE_CREDENTIAL}); update it (fleet nodes update) and retry`, "BENCH_NODE_UNSUPPORTED");
+  if (!(await capabilitiesOf(tenantId, station.nodeId) ?? []).includes(BENCH_REMOTE_ATTACH))
+    refuse(409, `the station's node ${station.nodeId} cannot attach its agent to a remote bench (it does not advertise ` +
+      `${BENCH_REMOTE_ATTACH}); update it (fleet nodes update) and retry`, "STATION_NODE_UNSUPPORTED");
+  if (station.harness !== "hermes")
+    refuse(409, `a remote stage needs a Hermes station; this station runs ${station.harness}`, "REMOTE_HARNESS_UNSUPPORTED");
+  return { registryNode: benchNodeId, executor: { execution: "remote", stationId: station.id, nodeId: station.nodeId } };
 }
 
 async function organizationOf(tenantId: string): Promise<string> {
@@ -144,7 +186,9 @@ function nodeRepositories(repos: BenchStageRepository[]) {
     object_format: r.objectFormat ?? "sha1" }));
 }
 
-function nodeWorker(worker: BenchStageWorker | undefined): Partial<NodeProfileChange> {
+function nodeWorker(worker: BenchStageWorker | undefined, placement: Placement): Partial<NodeProfileChange> {
+  // A remote stage runs no worker: the bench node only leases, attaches and finishes.
+  if (placement.executor) return { launch: "remote-v1" };
   if (!worker) return {};
   return { arguments: worker.arguments, environment: worker.environment ?? {},
     launch: worker.launch === "grouped" ? "" : "registered-v1" };
@@ -176,10 +220,10 @@ function choiceAfter(before: CheckpointProfile, req: BenchStageSetRequest): Stag
 function buildProfile(f: {
   name: string; tenantId: string; organizationId: string; sourceTenantId: string; audience: string; reporter: string;
   station: StationFacts; agentKey: string; profileKey: string | null; served: BenchRegistryProfileView;
-  repositories: PublicRepository[]; checkpointRepository: string; choice: StageChoice;
+  repositories: PublicRepository[]; checkpointRepository: string; choice: StageChoice; placement: Placement;
 }): CheckpointProfile {
   const t = f.served.target;
-  if (t.tenant_id !== f.tenantId || t.station_id !== f.station.id || t.node_id !== f.station.nodeId)
+  if (t.tenant_id !== f.tenantId || t.station_id !== f.station.id || t.node_id !== f.placement.registryNode)
     return refuse(502, "the node serves this stage under another workspace, station or node; nothing was changed on the hub");
   const digests = new Map(f.served.repositories.map((r) => [r.name, r]));
   const repositories = f.repositories.toSorted((a, b) => (a.name < b.name ? -1 : 1)).map((r) => {
@@ -197,6 +241,7 @@ function buildProfile(f: {
       ...(f.choice.cardsChoose ? { repositorySelection: "card" } : {}),
       ...(f.choice.cardsChoose && f.choice.defaultRepositories?.length
         ? { defaultRepositories: f.choice.defaultRepositories.toSorted() } : {}),
+      ...(f.placement.executor ? { executor: f.placement.executor } : {}),
     });
   } catch (error) {
     if (error instanceof CheckpointRefused)
@@ -266,7 +311,8 @@ function view(profile: CheckpointProfile, origin: BenchStageView["origin"], stag
       repositorySHA256: r.repositorySHA256 })),
     cardsChoose: profile.repositorySelection === "card",
     ...(profile.defaultRepositories ? { defaultRepositories: [...profile.defaultRepositories] } : {}),
-    registrySHA256: profile.target.registry_sha256, keepBench, served, ...(detail ? { detail } : {}) };
+    registrySHA256: profile.target.registry_sha256, execution: isRemoteProfile(profile) ? "remote" : "one-shot",
+    ...(isRemoteProfile(profile) ? { benchNodeId: profile.target.node_id } : {}), keepBench, served, ...(detail ? { detail } : {}) };
 }
 
 /**
@@ -318,7 +364,8 @@ function nextSteps(profile: CheckpointProfile, stageId: string | null, hasMcpTok
 
 /**
  * This stage's own pins that a write changed, by field, with the value before and after — and
- * `keepBench`, which lives on the hub's row rather than in the pins, when the write flipped it.
+ * `keepBench`, which lives on the hub's row rather than in the pins, when the write flipped it,
+ * and `execution` when the write switched it.
  */
 function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProfile,
   keepBench?: { from: boolean; to: boolean }): Record<string, { from: string | boolean; to: string | boolean }> {
@@ -326,6 +373,8 @@ function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProf
   return Object.fromEntries([
     ...targetDifference(after.target, before.target).map((k) => [k, { from: before.target[k], to: after.target[k] }] as const),
     ...(keepBench && keepBench.from !== keepBench.to ? [["keepBench", keepBench] as const] : []),
+    ...(isRemoteProfile(before) !== isRemoteProfile(after)
+      ? [["execution", { from: isRemoteProfile(before) ? "remote" : "one-shot", to: isRemoteProfile(after) ? "remote" : "one-shot" }] as const] : []),
   ]);
 }
 
@@ -371,6 +420,7 @@ export function addBenchStage(userId: string, tenantId: string, req: BenchStageA
     if (stages.some((s) => s.row.boardId === req.boardId && s.row.stationId === req.stationId))
       refuse(409, "another stage already serves this board on this station");
     const station = await stationFacts(tenantId, req.stationId);
+    const placement = await placementFor(tenantId, station, req.execution === "remote" ? req.benchNodeId : undefined);
     const organizationId = await organizationOf(tenantId);
     const at = audience();
     const sourceTenantId = sourceTenant(tenantId, req.sourceTenantId, stages);
@@ -378,13 +428,14 @@ export function addBenchStage(userId: string, tenantId: string, req: BenchStageA
     const roster = await rosterRow(userId, tenantId, req.name, req.stationId, req.boardId, req.bridgeKey);
     const change: NodeProfileChange = { id: req.name, tenant_id: tenantId, board_id: req.boardId, agent_id: req.agentId,
       station_id: req.stationId, checkpoint_repository: req.checkpointRepository, repositories: nodeRepositories(req.repositories),
-      ...nodeWorker(req.worker) };
-    const status = expectAnswer(await audited(userId, tenantId, station, "bench.registry.set",
-      { stage: req.name, boardId: req.boardId, action: "add" }, () => nodeRegistrySet(station.nodeId, change, req.repin ?? false)));
+      ...nodeWorker(req.worker, placement) };
+    const status = expectAnswer(await audited(userId, tenantId, { ...station, nodeId: placement.registryNode }, "bench.registry.set",
+      { stage: req.name, boardId: req.boardId, action: "add" }, () => nodeRegistrySet(placement.registryNode, change, req.repin ?? false)));
     const served = status.profiles.find((p) => p.id === req.name) ?? refuse(502, "the node did not serve the stage it was given");
     const profile = buildProfile({ name: req.name, tenantId, organizationId, sourceTenantId, audience: at, reporter: reporterId, station,
       agentKey: roster.key, profileKey: roster.profileKey, served, repositories: req.repositories, checkpointRepository: req.checkpointRepository,
-      choice: { cardsChoose: req.cardsChoose === true, ...(req.defaultRepositories ? { defaultRepositories: req.defaultRepositories } : {}) } });
+      choice: { cardsChoose: req.cardsChoose === true, ...(req.defaultRepositories ? { defaultRepositories: req.defaultRepositories } : {}) },
+      placement });
     return finish(userId, tenantId, req.name, profile, req.stageId ?? null, status, true, roster.key, undefined, req.keepBench ?? false);
   });
 }
@@ -397,6 +448,24 @@ async function currentStage(tenantId: string, name: string): Promise<{ profile: 
   return file ? { profile: file, stageId: null } : refuse(404, `no stage named ${name} in this workspace`);
 }
 
+/**
+ * A `set`'s bench node: undefined for a stage that is (or becomes) one-shot. Switching execution
+ * is the same write as any other; a switch to one-shot gives the worker again, which a remote
+ * stage's node never held.
+ */
+function remoteBenchNode(before: CheckpointProfile, req: BenchStageSetRequest): string | undefined {
+  const wasRemote = isRemoteProfile(before);
+  const remote = (req.execution ?? (wasRemote ? "remote" : "one-shot")) === "remote";
+  if (!remote) {
+    if (req.benchNodeId !== undefined) refuse(400, "--bench-node is for a remote stage (--execution remote)");
+    if (wasRemote && !req.worker) refuse(400, "a stage that becomes one-shot needs its --worker");
+    return undefined;
+  }
+  if (req.worker) refuse(400, "a remote stage runs no worker on the bench host; drop --worker");
+  return req.benchNodeId ?? (wasRemote ? before.target.node_id : undefined) ??
+    refuse(400, "a remote stage names its bench node (--bench-node)");
+}
+
 export function setBenchStage(userId: string, tenantId: string, name: string, req: BenchStageSetRequest): Promise<StageResult> {
   return guarded(async () => {
     if (Object.keys(req).length === 0) refuse(400, "nothing to change");
@@ -405,8 +474,11 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
     const boardId = req.boardId ?? before.target.board_id;
     const stationId = req.stationId ?? before.target.station_id;
     const station = await stationFacts(tenantId, stationId);
-    const moved = station.nodeId !== before.target.node_id;
-    if (moved && (!req.repositories || !req.worker))
+    const placement = await placementFor(tenantId, station, remoteBenchNode(before, req));
+    const moved = placement.registryNode !== before.target.node_id;
+    if (moved && placement.executor && !req.repositories)
+      refuse(400, "the stage's bench moves to another node: give its --repo list again, which only the old node holds");
+    if (moved && !placement.executor && (!req.repositories || !req.worker))
       refuse(400, "the stage moves to a station on another node: give its --repo list and --worker again, which only the old node holds");
     const organizationId = await organizationOf(tenantId);
     const at = audience();
@@ -429,9 +501,9 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
     if (!roster) return refuse(409, `the stage's roster row ${before.agentKey} is gone; add it again with fleet bridge add`);
     const change: NodeProfileChange = { id: name, tenant_id: tenantId, board_id: boardId, agent_id: req.agentId ?? before.target.agent_id,
       station_id: stationId, ...(req.checkpointRepository ? { checkpoint_repository: req.checkpointRepository } : {}),
-      ...(req.repositories ? { repositories: nodeRepositories(req.repositories) } : {}), ...nodeWorker(req.worker) };
-    const status = expectAnswer(await audited(userId, tenantId, station, "bench.registry.set",
-      { stage: name, boardId, action: "set" }, () => nodeRegistrySet(station.nodeId, change, req.repin ?? false)));
+      ...(req.repositories ? { repositories: nodeRepositories(req.repositories) } : {}), ...nodeWorker(req.worker, placement) };
+    const status = expectAnswer(await audited(userId, tenantId, { ...station, nodeId: placement.registryNode }, "bench.registry.set",
+      { stage: name, boardId, action: "set" }, () => nodeRegistrySet(placement.registryNode, change, req.repin ?? false)));
     if (moved) {
       // The new node serves it; the old one stops. A failure here leaves a profile the hub no
       // longer pins, which `stage list` on that node shows and nothing selects.
@@ -442,7 +514,7 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
     const profile = buildProfile({ name, tenantId, organizationId, sourceTenantId: req.sourceTenantId ?? before.sourceTenantId,
       audience: at, reporter: reporterId, station, agentKey: roster.key, profileKey: roster.profileKey, served,
       repositories: req.repositories ?? before.repositories, checkpointRepository: req.checkpointRepository ?? before.checkpointRepository,
-      choice });
+      choice, placement });
     return finish(userId, tenantId, name, profile, req.stageId ?? stageId, status, false, roster.key, before, req.keepBench);
   });
 }
@@ -452,7 +524,8 @@ export function removeBenchStage(userId: string, tenantId: string, name: string)
     const { profile } = await currentStage(tenantId, name);
     const [s] = await db.select().from(stations).where(tenantScope(stations, tenantId, eq(stations.id, profile.target.station_id)));
     const station: StationFacts = { id: profile.target.station_id, nodeId: profile.target.node_id, stationKey: s?.stationKey ?? "",
-      principalId: profile.occupantPrincipalId, ownerPrincipalId: profile.ownerPrincipalId, occupancyEpoch: profile.occupancyEpoch };
+      principalId: profile.occupantPrincipalId, ownerPrincipalId: profile.ownerPrincipalId, occupancyEpoch: profile.occupancyEpoch,
+      harness: s?.harness ?? "" };
     const answer = await audited(userId, tenantId, station, "bench.registry.remove", { stage: name },
       () => nodeRegistryRemove(profile.target.node_id, name));
     // A node that no longer has the profile has nothing to remove; any other refusal keeps the row.

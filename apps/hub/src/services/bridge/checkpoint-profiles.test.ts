@@ -7,7 +7,7 @@ import { installTableCheckpointProfiles, installedCheckpointProfiles, mergeCheck
   requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
-import { checkpointProfileId, checkpointTask, claimedRepositories, claimRefusal, claimRepositoriesAllowed, parseCheckpointProfile,
+import { checkpointProfileId, checkpointTask, claimedRepositories, claimRefusal, claimRepositoriesAllowed, isRemoteProfile, parseCheckpointProfile,
   type CheckpointProfile } from "./checkpoint-profile";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalSha256 } from "./checkpoint-policy";
@@ -256,4 +256,23 @@ test("a card stage's default is a sorted subset that resolves a start", () => {
     expect(() => cardProfile({ defaultRepositories })).toThrow("Checkpoint refused: invalid");
   // A default without per-card choice is not a profile.
   expect(() => parseCheckpointProfile({ ...fixture(), defaultRepositories: ["api"] })).toThrow("Checkpoint refused: invalid");
+});
+
+test("remote stage profile names the executor station and its node", () => {
+  const oneShot = parseCheckpointProfile(fixture());
+  expect(isRemoteProfile(oneShot)).toBe(false);
+  // A one-shot profile's bytes are what they were: no executor key at all.
+  expect(canonicalCheckpoint(oneShot)).toBe(canonicalCheckpoint(fixture()));
+  expect(Object.hasOwn(oneShot, "executor")).toBe(false);
+  const executor = { execution: "remote" as const, stationId: oneShot.target.station_id, nodeId: "node_agent" };
+  const remote = parseCheckpointProfile({ ...fixture(), executor });
+  expect(isRemoteProfile(remote)).toBe(true);
+  expect(remote.executor).toEqual(executor);
+  expect(Object.isFrozen(remote.executor)).toBe(true);
+  // The bench host's node stays the target, so a remote stage's claim is checked against it as before.
+  expect(claimRefusal(remote, claimFor(remote))).toBeUndefined();
+  // The executor is the target's station, on its own node; anything else, or an unknown execution, is refused.
+  for (const bad of [{ ...executor, stationId: "other-station" }, { ...executor, execution: "one-shot" }, { ...executor, extra: 1 },
+    { execution: "remote", stationId: executor.stationId }])
+    expect(() => parseCheckpointProfile({ ...fixture(), executor: bad })).toThrow("Checkpoint refused: invalid");
 });

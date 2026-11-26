@@ -62,6 +62,8 @@ def _chunk(delta: dict, finish: str | None = None) -> bytes:
 class ModelHandler(BaseHTTPRequestHandler):
     requests: list = []
     tool: str = ""
+    # None: the streaming turn. A dict: call exactly this tool with these args.
+    forced: dict | None = None
 
     def log_message(self, *_):
         pass
@@ -95,7 +97,10 @@ class ModelHandler(BaseHTTPRequestHandler):
         if not after_tool:
             for word in REASONING.split(" "):
                 self._send(_chunk({"role": "assistant", "reasoning_content": word + " "}))
-            name, args = _pick_tool(body.get("tools") or [])
+            if ModelHandler.forced is not None:
+                name, args = ModelHandler.forced["name"], ModelHandler.forced["args"]
+            else:
+                name, args = _pick_tool(body.get("tools") or [])
             ModelHandler.tool = name
             self._send(_chunk({"tool_calls": [{
                 "index": 0, "id": "call_contract_1", "type": "function",
@@ -287,6 +292,7 @@ def main() -> int:
     failures += _check_what_no_hook_covers()
     print(f"fleet reports: {[r.get('event', {}).get('type') for r in node.reports]}")
     node.close()
+    failures += _check_bench(home, model, AIAgent)
     return _report(failures, home)
 
 
@@ -457,6 +463,161 @@ def _check_what_no_hook_covers() -> list[str]:
     except OSError as exc:
         failures.append(f"could not read Hermes's Matrix adapter: {exc}")
     return failures
+
+
+# ─── Remote bench ────────────────────────────────────────────────────────────
+
+BENCH_ID = "0123456789abcdef0123456789abcdef"
+
+# The equivalence the rewrite claims: for each edit, replace mode on a local backend and the V4A
+# patch the plugin rewrites it into leave the same file, and fail together.
+EQUIVALENCE = [
+    ("mid-line fragment", "def f():\n    return 'alpha beta gamma'\n", "beta", "BETA"),
+    ("whole lines", "def f():\n    return 1\n\n\ndef g():\n    return 2\n", "def g():\n    return 2\n", "def g():\n    return 3\n"),
+    ("duplicate old_string", "x = 1\ny = 0\nx = 1\n", "x = 1", "x = 2"),
+    ("whitespace-sensitive", "def f():\n\treturn 1  \n    return 1\n", "\treturn 1  ", "\treturn 10  "),
+    ("CRLF file, one line", "a\r\nbeta\r\nc\r\n", "beta", "BETA"),
+    ("CRLF file, across lines", "a\r\nbeta\r\nc\r\n", "a\nbeta", "A\nBETA"),
+]
+
+
+def _bench_turn(model, AIAgent, session_id: str, tool: dict) -> tuple:
+    """One turn whose model calls *tool*; returns (system prompt, tool result) as Hermes sent them."""
+    ModelHandler.forced = tool
+    first = len(ModelHandler.requests)
+    agent = AIAgent(
+        base_url=f"http://127.0.0.1:{model.server_port}/v1", api_key="contract-key", provider="custom", model=MODEL,
+        quiet_mode=True, skip_context_files=True, skip_memory=True, enabled_toolsets=["file"], platform="cli",
+        session_id=session_id,
+    )
+    try:
+        agent.run_conversation("Edit the file.")
+    finally:
+        ModelHandler.forced = None
+    turn = [r for r in ModelHandler.requests[first:] if r.get("stream")]
+    system = next((m.get("content") for m in (turn[0].get("messages") if turn else []) if m.get("role") == "system"), "")
+    results = [m.get("content") for r in turn for m in r.get("messages") or [] if m.get("role") == "tool"]
+    if isinstance(system, list):
+        system = " ".join(str(part.get("text", "")) for part in system if isinstance(part, dict))
+    return str(system or ""), str(results[-1] if results else "")
+
+
+def _check_bench(home: pathlib.Path, model, AIAgent) -> list[str]:
+    """Attached, a replace-mode patch is rewritten into V4A and lands exactly as replace mode
+    would, only under the working directory, and the model is told where it is working. Detached,
+    none of that happens."""
+    # Attached, replace mode is made to fail at the backend, as it does on a remote bench, and the
+    # path that ran is recorded: an attached edit may land only through V4A.
+    from tools import file_operations as fo
+
+    used: list[str] = []
+    attached = [False]
+    real_replace, real_v4a = fo.ShellFileOperations.patch_replace, fo.ShellFileOperations.patch_v4a
+
+    def replace_seen(self, *a, **k):
+        used.append("replace")
+        if attached[0]:
+            raise RuntimeError("replace mode reached the backend (as on a remote bench, it cannot land)")
+        return real_replace(self, *a, **k)
+
+    def v4a_seen(self, *a, **k):
+        used.append("v4a")
+        return real_v4a(self, *a, **k)
+
+    fo.ShellFileOperations.patch_replace, fo.ShellFileOperations.patch_v4a = replace_seen, v4a_seen
+    try:
+        return _bench_scenarios(home, model, AIAgent, used, attached) + _hermes_unit_tests()
+    finally:
+        fo.ShellFileOperations.patch_replace, fo.ShellFileOperations.patch_v4a = real_replace, real_v4a
+
+
+def _bench_scenarios(home: pathlib.Path, model, AIAgent, used: list, attached: list) -> list[str]:
+    failures = []
+
+    def expect(cond, message):
+        if not cond:
+            failures.append(message)
+
+    bench = home / "bench"
+    bench.mkdir()
+    state = home / "agentpod-bench.json"
+
+    def attach():
+        state.write_text(json.dumps({"version": 1, "bench_id": BENCH_ID, "working_directory": str(bench),
+                                     "valid_before": "2099-01-01T00:00:00Z"}))
+        attached[0] = True
+
+    def detach():
+        state.unlink()
+        attached[0] = False
+
+    def edit(name: str, content: str, args: dict, session: str) -> tuple:
+        """(file after, tool result, paths used) for one patch call on a fresh copy of content."""
+        target = bench / name
+        target.write_bytes(content.encode())
+        used.clear()
+        _, result = _bench_turn(model, AIAgent, session, {"name": "patch", "args": {"path": str(target), **args}})
+        return target.read_bytes().decode(), result, list(used)
+
+    for i, (name, content, old, new) in enumerate(EQUIVALENCE):
+        args = {"old_string": old, "new_string": new}
+        direct, direct_result, direct_used = edit(f"eq{i}.txt", content, args, f"contract-direct-{i}")
+        attach()
+        try:
+            rewritten, rewritten_result, rewritten_used = edit(f"eq{i}.txt", content, args, f"contract-v4a-{i}")
+        finally:
+            detach()
+        expect(direct_used == ["replace"], f"{name}: detached, the edit did not run as replace mode: {direct_used}")
+        expect(rewritten_used in (["v4a"], []), f"{name}: attached, the edit reached {rewritten_used}, not V4A alone")
+        expect(rewritten == direct, f"{name}: V4A left {rewritten!r}, replace mode {direct!r} "
+                                    f"(v4a: {rewritten_result[:200]}; replace: {direct_result[:200]})")
+        failed_direct, failed_v4a = direct == content, rewritten == content
+        expect(failed_direct == failed_v4a, f"{name}: one mode changed the file and the other did not")
+        if name == "duplicate old_string":
+            expect(failed_direct and failed_v4a, f"{name}: an ambiguous edit landed")
+        elif not name.startswith("CRLF file, across"):
+            expect(not failed_direct, f"{name}: replace mode did not apply ({direct_result[:200]})")
+
+    attach()
+    target = bench / "outside-check.txt"
+    target.write_text("keep\n")
+    outside = home / "outside.txt"
+    outside.write_text("keep\n")
+    used.clear()
+    system, result = _bench_turn(model, AIAgent, "contract-outside",
+                                 {"name": "patch", "args": {"path": str(outside), "old_string": "keep", "new_string": "lost"}})
+    expect(outside.read_text() == "keep\n" and used == [] and "exposes only" in result,
+           f"attached: a path outside the working directory was edited or not refused: {used} {result[:200]}")
+    expect(BENCH_ID in system and str(bench) in system, "attached: the bench note is not in the session's system prompt")
+
+    used.clear()
+    _, result = _bench_turn(model, AIAgent, "contract-replace-all", {"name": "patch", "args": {
+        "path": str(target), "old_string": "keep", "new_string": "lost", "replace_all": True}})
+    expect(target.read_text() == "keep\n" and used == [] and ('mode=\\"patch\\"' in result or 'mode="patch"' in result),
+           f"attached: replace_all was not blocked with a V4A hint: {used} {result[:200]}")
+
+    detach()
+    system, _ = _bench_turn(model, AIAgent, "contract-detached", {"name": "read_file", "args": {"path": str(target)}})
+    expect(BENCH_ID not in system, "detached: the bench note is still in the system prompt")
+    return failures
+
+
+def _hermes_unit_tests() -> list[str]:
+    """The plugin's unit tests that need Hermes's own parser, run here where Hermes is installed."""
+    import importlib.util
+    import unittest
+
+    spec = importlib.util.spec_from_file_location("agentpod_live_tests", PLUGIN_DIR / "test_agentpod_live.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(module.ReplaceAsV4ATest)
+    result = unittest.TestResult()
+    suite.run(result)
+    problems = [f"unit {test.id()}: {err.strip().splitlines()[-1]}" for test, err in result.failures + result.errors]
+    problems += [f"unit {test.id()} was skipped inside Hermes: {why}" for test, why in result.skipped]
+    if result.testsRun == 0:
+        problems.append("the plugin's parser unit tests did not run")
+    return problems
 
 
 def _report(failures: list[str], home: pathlib.Path) -> int:

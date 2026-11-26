@@ -11,6 +11,8 @@
  * - `prepare` makes two current checks, reads the bench, and creates, leases and checkpoints it.
  * - `execute` launches a task that may run for its whole `timeout_seconds`. No bound can fit that,
  *   so the Hub waits for a short run only; a longer one is read later with `status`.
+ * - `attach` (a remote stage) makes one current check and asks the bench daemon for a certificate.
+ * - `finish` (a remote stage) makes one current check, then checkpoints, stops and releases the bench.
  */
 export const NODE_CURRENT_DEADLINE_MS = 20_000;
 export const NODE_CALL_TIMEOUT_MS = {
@@ -18,6 +20,8 @@ export const NODE_CALL_TIMEOUT_MS = {
   status: 60_000,
   prepare: 120_000,
   execute: 60_000,
+  attach: 60_000,
+  finish: 120_000,
 } as const;
 
 export function nodeCallTimeoutMs(operation: keyof typeof NODE_CALL_TIMEOUT_MS): number {

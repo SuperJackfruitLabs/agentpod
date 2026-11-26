@@ -77,6 +77,7 @@ export default defineConfig({
             { label: 'When a turn fails', slug: 'use/errors' },
             { label: 'Declared harness settings', slug: 'use/config' },
             { label: 'Working a board', slug: 'use/boards' },
+            { label: 'Remote bench stages', slug: 'use/remote-bench-stages' },
             { label: 'Dispatch and grants', slug: 'use/grants' },
             { label: 'Attaching an editor', slug: 'use/acp' },
           ],

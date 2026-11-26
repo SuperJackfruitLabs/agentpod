@@ -13,6 +13,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchjournal"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchsource"
 )
 
@@ -31,11 +32,21 @@ type Intent struct {
 	Task           *benchdispatch.SourceTask `json:"task,omitempty"`
 	ExecuteRequest string                    `json:"execute_request,omitempty"`
 	ExecuteSHA256  string                    `json:"execute_sha256,omitempty"`
+	// Launch is "remote-v1" for an attempt a remote-v1 profile resolved, and
+	// empty for every other launch (whose intents are unchanged). A remote
+	// task has no worker arguments; every other task has some.
+	Launch string `json:"launch,omitempty"`
 }
 
 // IntentStore is independent private adapter metadata. It fixes Create and the
 // resolved task BEFORE SourceCoordinator is invoked; it contains no lease token.
-type IntentStore struct{ Root string }
+//
+// Launch is the launch of the profile serving the request; Resolve records it
+// on a remote-v1 intent.
+type IntentStore struct {
+	Root   string
+	Launch string
+}
 
 func rawSHA(raw []byte) string { h := sha256.Sum256(raw); return hex.EncodeToString(h[:]) }
 func intentName(identity benchcoordinatorwire.Identity) string {
@@ -53,7 +64,7 @@ func validIntent(i Intent, request benchcoordinatorwire.Request) bool {
 		return false
 	}
 	if i.Phase == "reserved" {
-		return i.Spec == nil && i.Task == nil && i.ExecuteRequest == "" && i.ExecuteSHA256 == ""
+		return i.Spec == nil && i.Task == nil && i.ExecuteRequest == "" && i.ExecuteSHA256 == "" && i.Launch == ""
 	}
 	if i.Phase != "resolved" && i.Phase != "effects" || i.Spec == nil || i.Task == nil {
 		return false
@@ -71,7 +82,8 @@ func validIntent(i Intent, request benchcoordinatorwire.Request) bool {
 	}
 	return benchsource.ValidSpec(*i.Spec) && i.Spec.Identity == benchdispatch.Identity(*stored.Identity) &&
 		i.Spec.HostID == stored.Target.HostID && i.Spec.WorkerSHA256 == stored.Target.WorkerSHA256 &&
-		len(i.Task.Arguments) > 0 && i.Task.Environment != nil &&
+		(i.Launch == "" || i.Launch == benchremote.Mode) && (len(i.Task.Arguments) == 0) == (i.Launch == benchremote.Mode) &&
+		len(i.Task.Arguments) <= 128 && i.Task.Environment != nil &&
 		i.Spec.TaskSHA256 == benchdispatch.SourceTaskSHA256(*i.Task) && stored.Task != nil &&
 		i.Task.Prompt == stored.Task.Prompt && uint64(i.Task.TimeoutSeconds) == stored.Task.TimeoutSeconds &&
 		i.Task.RepositoryName == stored.Task.RepositoryName
@@ -170,6 +182,9 @@ func (s IntentStore) Resolve(ctx context.Context, prepareRaw []byte,
 			return false, ErrIntent
 		}
 		i.Spec, i.Task, i.Phase = &spec, &task, "resolved"
+		if s.Launch == benchremote.Mode {
+			i.Launch = s.Launch
+		}
 		result = *i
 		return true, nil
 	})

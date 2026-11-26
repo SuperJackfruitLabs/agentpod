@@ -46,7 +46,7 @@ export async function completedAttemptFixture(): Promise<{ attempt: RetainedChec
     prepareRequest: JSON.stringify(request), prepareSHA256: "e".repeat(64), phase: "execute_pending",
     prepared: canonicalCheckpoint(completion.source), source: null, sourceReceipt: null, executeRequest: execute,
     executeSHA256: createHash("sha256").update(execute, "utf8").digest("hex"), completion: null, settlementBody: null,
-    settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null,
+    settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, remote: null,
     createdAt: new Date(0), updatedAt: new Date(0) } };
   return { attempt, completion };
 }

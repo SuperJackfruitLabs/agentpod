@@ -14,6 +14,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchremote"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -79,6 +80,15 @@ func (h *Handler) check(ctx context.Context, r benchcoordinatorwire.Request, p L
 		current.ExecuteRequestSHA256 = rawSHA([]byte(intent.ExecuteRequest))
 		current.BindingSHA256 = r.BindingSHA256
 		current.SourceDigest = r.SourceReceipt.SourceDigest
+	}
+	if phase == "attach" || phase == "finish" {
+		// A remote attach or finish names its binding and its own exact
+		// bytes; it has no source receipt.
+		if phase != r.Operation || intent.ExecuteRequest == "" {
+			return ErrCurrent
+		}
+		current.ExecuteRequestSHA256 = rawSHA([]byte(intent.ExecuteRequest))
+		current.BindingSHA256 = r.BindingSHA256
 	}
 	if err := h.current.Check(ctx, current); err != nil {
 		if errors.Is(err, ErrStale) && h.installed() == nil {
@@ -167,7 +177,7 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 					return zero, benchdispatch.SourceTask{}, ErrReclaiming
 				case "reclaimed":
 				case "materializing", "initializing":
-					create = p.Launch == benchlaunch.Mode
+					create = p.Launch == benchlaunch.Mode || p.Launch == benchremote.Mode
 				default:
 					create = false
 				}
@@ -180,7 +190,8 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 			return zero, benchdispatch.SourceTask{}, ErrIntent
 		}
 	}
-	task := benchdispatch.SourceTask{Arguments: append([]string(nil), p.Arguments...), Environment: map[string]string{}, Prompt: r.Task.Prompt,
+	// Never nil: a remote-v1 profile has no arguments, and the intent journal refuses a null list.
+	task := benchdispatch.SourceTask{Arguments: append([]string{}, p.Arguments...), Environment: map[string]string{}, Prompt: r.Task.Prompt,
 		TimeoutSeconds: timeout, RepositoryName: r.Task.RepositoryName}
 	for k, v := range p.Environment {
 		task.Environment[k] = v
@@ -204,7 +215,13 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 // call that claimed the effects, or any identical prepare of a registered
 // launch, whose journaled steps make a repeat a resume (see handle).
 func prepareResumes(claimed bool, p LocalProfile) bool {
-	return claimed || p.Launch == benchlaunch.Mode
+	return claimed || journaled(p)
+}
+
+// journaled is a launch whose every step is journaled before it leaves: the
+// registered launch and the remote launch built on its steps.
+func journaled(p LocalProfile) bool {
+	return p.Launch == benchlaunch.Mode || p.Launch == benchremote.Mode
 }
 
 // coordinator is the attempt lifecycle the handler drives. The grouped
@@ -240,6 +257,12 @@ func (h *Handler) manager(r benchcoordinatorwire.Request, p LocalProfile, intent
 			return ErrCurrent
 		}
 		return nil
+	}
+	if p.Launch == benchremote.Mode {
+		// Its own private journal beside the registered one, also 0700.
+		root := benchremote.JournalRoot(h.registry.StateRoot)
+		_ = os.Mkdir(root, 0700)
+		return benchremote.Coordinator{Journal: benchremote.Journal{Root: root}, Producer: h.client, Client: h.client, Repositories: repositories, Current: current}
 	}
 	if p.Launch == benchlaunch.Mode {
 		// A private sibling of the grouped journal; Journal refuses it unless 0700.
@@ -385,7 +408,7 @@ func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw
 		target := h.registry.target(p, h.registrySHA)
 		return checkedResponse(r, benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: "ready", State: "available", Target: &target})
 	}
-	intents := IntentStore{Root: h.registry.IntentRoot}
+	intents := IntentStore{Root: h.registry.IntentRoot, Launch: p.Launch}
 	if r.Operation == "prepare" {
 		// The authenticated Hub reservation and current decision precede even the
 		// private intent. No missing/corrupt source journal grants Create permission.
@@ -430,6 +453,15 @@ func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw
 	}
 	if r.Operation == "status" {
 		return h.status(ctx, r, p, intent)
+	}
+	if r.Operation == "attach" || r.Operation == "finish" {
+		return h.remote(ctx, r, raw, p, intent)
+	}
+	if p.Launch == benchremote.Mode {
+		// A remote launch runs nothing on the bench host; nothing is claimed.
+		response := refused(r.Operation)
+		response.Code = "unsupported"
+		return response, nil
 	}
 	if intent.Spec == nil {
 		return pending(r), ErrIntent
@@ -481,7 +513,7 @@ func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p 
 		}
 		return refused(r.Operation), ErrCurrent
 	}
-	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || p.Launch != benchlaunch.Mode) {
+	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || !journaled(p)) {
 		return refused(r.Operation), ErrCurrent
 	}
 	m := h.manager(r, p, intent, "observe")
@@ -552,11 +584,19 @@ func (h *Handler) superseded(ctx context.Context, r benchcoordinatorwire.Request
 	if intent.Spec == nil {
 		return refused(r.Operation), ErrIntent
 	}
-	// Only the registered launch can retire on its own; its journal is the
-	// registry's, not the replaced profile's.
-	m := benchlaunch.Coordinator{Journal: benchlaunch.Journal{Root: filepath.Join(h.registry.StateRoot, "registered")}, Producer: h.client,
-		Current: func(context.Context, benchdispatch.SourceSpec) error { return benchlaunch.ErrSuperseded }}
-	status, err := m.RetireUnlaunched(ctx, *intent.Spec)
+	// Only the journaled launches can retire on their own; their journals are
+	// the registry's, not the replaced profile's. A remote record runs nothing
+	// here, so it always retires: its lease is stopped (fencing any session)
+	// and released with its own token.
+	stale := func(context.Context, benchdispatch.SourceSpec) error { return benchlaunch.ErrSuperseded }
+	var status benchcoordinator.Status
+	if intent.Launch == benchremote.Mode {
+		m := benchremote.Coordinator{Journal: benchremote.Journal{Root: benchremote.JournalRoot(h.registry.StateRoot)}, Producer: h.client, Client: h.client, Current: stale}
+		status, err = m.RetireUnlaunched(ctx, *intent.Spec)
+	} else {
+		m := benchlaunch.Coordinator{Journal: benchlaunch.Journal{Root: filepath.Join(h.registry.StateRoot, "registered")}, Producer: h.client, Current: stale}
+		status, err = m.RetireUnlaunched(ctx, *intent.Spec)
+	}
 	if err != nil {
 		if code, ok := benchlaunch.RefusalCode(err); ok && code == "stale_owner" {
 			return staleOwner(r), nil

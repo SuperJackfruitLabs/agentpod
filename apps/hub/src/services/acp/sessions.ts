@@ -53,14 +53,19 @@ import { recoverSalaamForNode } from "./recovery";
 export { closeOrphanedProcesses, reconcileOnBoot } from "./boot";
 export { SESSION_BUSY_MESSAGE, sessionIsBusy, whenIdle } from "./busy";
 export { _setSalaamCancelBeforeNotifyForTest, cancelTurn } from "./cancel";
-export { endSession, endSessionAsWorkspaceAdmin } from "./ending";
+export { closeStationSessions, endSession, endSessionAsWorkspaceAdmin } from "./ending";
 export { _subscriberCountForTest, subscribe } from "./events";
 export {
   STATION_BUSY_REASON,
+  STATION_IN_BENCH_MESSAGE,
   SalaamStationBusy,
+  StationInBench,
   interactiveWorkspaceAdmin,
   isSalaamStationBusy,
+  isStationInBench,
+  setStationHold,
   stationReadiness,
+  type StationHold,
   type StationReadiness,
 } from "./gates";
 export { sessionHasLibraryTools } from "./handshake";

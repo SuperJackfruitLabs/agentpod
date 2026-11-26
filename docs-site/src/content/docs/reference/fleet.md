@@ -2674,12 +2674,12 @@ fleet settings speech test
 The board roster: which agent claims from which board.
 
 ```text
-fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle> ...
+fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle|checkpoint-detached> ...
 ```
 
 This table is the gate on an agent doing anything at all: a staffed, online agent claims no card until a row points it at a board. No verb here prints a credential. See [Working a board](/use/boards/).
 
-Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work), [`checkpoint-attempts`](#fleet-bridge-checkpoint-attempts), [`checkpoint-settle`](#fleet-bridge-checkpoint-settle).
+Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work), [`checkpoint-attempts`](#fleet-bridge-checkpoint-attempts), [`checkpoint-settle`](#fleet-bridge-checkpoint-settle), [`checkpoint-detached`](#fleet-bridge-checkpoint-detached).
 
 `fleet bridge -h` prints:
 
@@ -2697,6 +2697,7 @@ usage:
   fleet bridge related-work BOARD on|off
   fleet bridge checkpoint-attempts
   fleet bridge checkpoint-settle ATTEMPT --evidence TEXT
+  fleet bridge checkpoint-detached ATTEMPT --evidence TEXT
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2874,6 +2875,30 @@ For an attempt the hub cannot retire by itself. Deletes nothing: the attempt end
 fleet bridge checkpoint-settle attempt_0123 --evidence "node journal shows the record cancelled; no bench lease held"
 ```
 
+### fleet bridge checkpoint-detached
+
+Record a remote bench stage's station as detached, after restoring it by hand.
+
+```text
+fleet bridge checkpoint-detached ATTEMPT --evidence TEXT
+```
+
+For an ended remote attempt whose station the agent's node will not detach (the detach sweep logs `remote.detach.invalid` on every pass), which keeps the station busy. First restore the station's own terminal on its node by hand. The hub then records the detach as confirmed and the station takes work again. It asks no node, changes nothing else, and is audited with your evidence. Refused (409) while the attempt is still in progress (`in_progress`; settle it first), and for a station already detached, or never attached as with a one-shot attempt (`not_attached`). Without an ATTEMPT, or with evidence under 20 characters, exits 2 without calling the hub.
+
+| Argument | Meaning |
+|---|---|
+| `ATTEMPT` | an ended remote attempt's `attempt_` id |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--evidence TEXT` | string | — | What you checked on the station's node, and how its terminal was restored. **Required.** |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bridge checkpoint-detached attempt_0123 --evidence "restored the profile's terminal by hand; no bench journal left"
+```
+
 ## fleet bench
 
 Bench stages: a board's checkpoint work on a SuperBench host, set up from the hub.
@@ -2894,10 +2919,12 @@ usage:
   fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
                        --repo name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] ...
                        --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                       | --execution remote --bench-node NODE
                        [--cards-choose [--default-repo N ...]]
                        [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]
   fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo ... ...]
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                       [--execution one-shot|remote] [--bench-node NODE]
                        [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
   fleet bench stage rm NAME
@@ -2913,7 +2940,10 @@ under the SuperPipeline stage field it goes in: checkpointPolicy, or
 cardCheckpointPolicy with --cards-choose. Moving a stage to another board is one
 "stage set NAME --board B". A card's bench is kept from stage to stage and
 cleared once the card is done, cancelled or dormant; the hub never clears the
-benches of a stage set --keep-bench.
+benches of a stage set --keep-bench. A stage is one-shot by default: the bench
+host runs --worker as one task. With --execution remote the station's agent
+(Hermes) works in the card's bench from its own node, over SSH, through the
+bench host's node named by --bench-node.
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2964,11 +2994,12 @@ Set up one stage: roster row, node registry profile and hub profile.
 fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
                      --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...
                      --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                     | --execution remote --bench-node NODE
                      [--cards-choose [--default-repo N ...]]
                      [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]
 ```
 
-In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories, unless `--cards-choose`: then each card chooses a subset of them in SuperPipeline, the hub's claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold `--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply prints the stage's policy under the SuperPipeline stage field it goes in: `checkpointPolicy`, or with `--cards-choose` `cardCheckpointPolicy`, and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.
+In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories, unless `--cards-choose`: then each card chooses a subset of them in SuperPipeline, the hub's claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold `--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply prints the stage's policy under the SuperPipeline stage field it goes in: `checkpointPolicy`, or with `--cards-choose` `cardCheckpointPolicy`, and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. A stage is `one-shot` by default: the bench host's node runs `--worker` as one task. `--execution remote --bench-node NODE` instead has the station's agent, which must be Hermes, work in the card's bench from its own node over SSH; the registry profile is written on NODE with launch `remote-v1` and no worker. The hub refuses it when NODE does not advertise `bench.remote.credential` (`BENCH_NODE_UNSUPPORTED`), the station's node does not advertise `bench.remote.attach` (`STATION_NODE_UNSUPPORTED`), or the station is not Hermes (`REMOTE_HARNESS_UNSUPPORTED`). Missing required flags are named together and exit 2.
 
 | Argument | Meaning |
 |---|---|
@@ -2981,8 +3012,10 @@ In order, each step idempotent and each refusal naming the step: the station's r
 | `--agent agt_…` | string | — | The SuperPipeline board agent (agt_) linked to the station's occupant. **Required.** |
 | `--checkpoint-repo N` | string | — | The repository the harness starts in. **Required.** |
 | `--repo SPEC` | string | — | Name=N,provider=forge\|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1\|sha256] (repeatable). **Required.** |
-| `--worker PATH` | string | — | Absolute path of the worker command on the bench host. **Required.** |
+| `--worker PATH` | string | — | Absolute path of the worker command on the bench host; required unless `--execution` remote. |
 | `--worker-arg A` | string | — | One argument after `--worker` (repeatable). |
+| `--execution one-shot\|remote` | string | — | One-shot (the default: the bench host runs `--worker`) or remote (the station's agent works in the bench from its own node). |
+| `--bench-node NODE` | string | — | With `--execution` remote: the node whose bench host holds the card's bench. |
 | `--env K=V` | string | — | KEY=VALUE for the worker: PATH, LANG, LC_ALL, TZ or TERM (repeatable). |
 | `--launch L` | string | — | Registered-v1 (default) or grouped. |
 | `--source-tenant tnt_…` | string | — | The SuperPipeline tenant (tnt_); default: this workspace's other stages'. |
@@ -3008,11 +3041,12 @@ Change one stage; the hub's pins and the node's target are re-derived.
 ```text
 fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]
                      [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                     [--execution one-shot|remote] [--bench-node NODE]
                      [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]
                      [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
 ```
 
-Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. A card keeps its bench from stage to stage and across review bounces; the hub clears it (its tree and quota) once the card is done, cancelled or dormant (`BENCH_DORMANT_AFTER_HOURS`, 72 by default). `--keep-bench` means the hub never clears this stage's benches, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.
+Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. `--execution` switches a stage between `one-shot` and `remote` in the same write: a switch to `one-shot` needs `--worker` again, a remote stage's `--bench-node` is kept unless given, and a bench moved to another node needs its `--repo` list again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. A card keeps its bench from stage to stage and across review bounces; the hub clears it (its tree and quota) once the card is done, cancelled or dormant (`BENCH_DORMANT_AFTER_HOURS`, 72 by default). `--keep-bench` means the hub never clears this stage's benches, and `--keep-bench=false` returns to the default. The reply's `changed` names each pin the write changed, and `keepBench` when it flipped, each with its value before and after; its policy is printed as `checkpointPolicy` or, for a stage whose cards choose, `cardCheckpointPolicy`.
 
 | Argument | Meaning |
 |---|---|
@@ -3026,6 +3060,8 @@ Fields not given keep their value on the node and in the hub. `--board` moves th
 | `--checkpoint-repo N` | string | — | The repository the harness starts in. |
 | `--repo SPEC` | string | — | Name=N,provider=forge\|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1\|sha256] (repeatable). |
 | `--worker PATH` | string | — | Absolute path of the worker command on the bench host. |
+| `--execution one-shot\|remote` | string | — | One-shot (the default: the bench host runs `--worker`) or remote (the station's agent works in the bench from its own node). |
+| `--bench-node NODE` | string | — | With `--execution` remote: the node whose bench host holds the card's bench. |
 | `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
 | `--refresh` | bool | `false` | Re-derive the hub's pins and the node's target, changing nothing else (set). |
 | `--keep-bench` | bool | `false` | Never clear this stage's benches, even once a card is done, cancelled or dormant; `--keep-bench`=false clears them again (the default). |

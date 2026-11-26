@@ -142,6 +142,41 @@ complete report port wiring, cancellation reconciliation, contract acceptance
 and operator provisioning remain rollout gates. A cancellation response alone
 is never a fence or release proof.
 
+## Remote launch: `attach` and `finish`
+
+A profile with launch `remote-v1` binds no run. After source admission the bench host's node answers
+two more operations. Neither carries a lease token, a private key or a path. Both bind the selectors
+(`tenant_id`, `board_id`, `station_id`, which must equal the identity's), the identity, the target
+and the prepared `binding_sha256`.
+
+- **`attach`** carries the remote agent's own `public_key`: one OpenSSH line, at most 8 KiB, no
+  control characters.
+  - The node asks benchd for a writer certificate for that key on the record's lease, and answers
+    `state: "attached"` with a `credential`. The credential holds the `certificate` (ed25519 or
+    ecdsa-nistp256), the bench principal `user`, the remote `address`, the pinned `host_key` and its
+    fingerprint, `lease_id`, `generation`, `valid_before`, and the session's `working_directory`.
+  - Sent again with the same key, it renews the certificate; a different key is refused. The
+    record keeps only the key's fingerprint and benchd's remote execution ID.
+  - An attach is refused while a finish is in flight, and after the record ended.
+- **`finish`** carries the agent's `report`: `{handoff, outcome: "complete"}`, with the handoff's
+  canonical bytes at most 32 KiB.
+  - The node journals the report, checkpoints the bench (benchd fences every session first), stops
+    and releases the lease, and answers `completed`.
+  - The completion's `worker_result_sha256` is the digest of the canonical report bytes. Its
+    `execution_id` is benchd's remote execution on the lease, and its `kind` is `grouped-v2`.
+  - A tree with uncommitted or untracked files is refused `dirty`, with SuperBench's message in
+    `detail`. The lease stays held, and the same record may attach again and finish.
+  - A finish whose reply was lost is safe to send again: a completed record answers its completion.
+
+The node's current check for both names `phase` `attach` or `finish`, the binding, and the
+SHA-256 of the node's own exact request bytes in `execute_request_sha256`. There is no
+`source_digest`, because neither operation has a source receipt. `execute` and its checks are
+unchanged.
+
+A `status` for a remote record reports `detail.lease: "held"` when the record ended but SuperBench
+refused its release: a dirty tree the node will not discard, or a lease it cannot release. See
+`bench-checkpoint-reporting.md`, "Remote stages".
+
 ## Conformance
 
 `src/fixtures/bench-coordinator-v1.json` is shared directly by Bun and Go tests.

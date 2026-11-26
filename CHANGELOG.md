@@ -10,6 +10,124 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Added
+
+- `fleet bench stage add|set --execution one-shot|remote --bench-node NODE`: a
+  bench stage chooses how its agent works in the card's bench. `one-shot`, the
+  default for every existing and new stage, is unchanged. A `remote` stage writes
+  its registry profile on the bench node with launch `remote-v1` and no worker,
+  and its checkpoint profile names the station and its own node as `executor`.
+  The hub refuses it when the bench node lacks `bench.remote.credential`
+  (`BENCH_NODE_UNSUPPORTED`), the station's node lacks `bench.remote.attach`
+  (`STATION_NODE_UNSUPPORTED`) or the station is not Hermes
+  (`REMOTE_HARNESS_UNSUPPORTED`). Only the configuration is stored here; the
+  remote attempt itself comes in a later change. Migration 0139 adds
+  `bench_stages.execution` and `bench_node_id`.
+- The hub runs a `remote` bench stage's attempt. After admission it attaches
+  (`attach_pending`: the station's public key from its node, a certificate
+  from the bench host's node, the station pointed at the bench), then the
+  station's agent works in one ACP turn opened afterwards with the bench's
+  workspace root as its cwd (`working`); the end of that turn is "done". The
+  hub renews the certificate when less than ten minutes remain, and heartbeats
+  the run only while the agent is alive and its node still holds the
+  attachment. `finish_pending` hands the agent's report to the bench host's
+  node, which checkpoints, stops and releases; a tree with uncommitted or
+  untracked files is sent back to the agent twice with SuperBench's own
+  words, then the run fails. The settlement is unchanged: `execution.id` is
+  the lease's remote execution and `workerResultSha256` the digest of the
+  report. The hub's current decision now decides the node's `attach` and
+  `finish` on the retained binding and request bytes. While a station is in a
+  remote phase, no roster loop for it claims other board work. Migration 0140
+  adds `checkpoint_dispatches.remote` (no certificate, key or token).
+- A remote bench stage survives a lost agent, a run end and a hub restart. A
+  turn that ends without the agent ending it, or whose node stops holding the
+  attachment, is no longer heartbeated, and the hub never fails or releases
+  the run itself: SuperPipeline reclaims it. A run the board ended (reclaimed,
+  or blocked or failed by the agent through the board tools) makes no
+  checkpoint: the bench host's node is told, stops and releases, the agent's
+  session is ended and its station detached, and the attempt is retired
+  `run_ended`. After a hub restart the agent is told once, in a fresh session,
+  to continue, while its station is online and the stage's time limit (which
+  counts from the first turn, across restarts and dirty-tree retries) has time
+  left, and only once the station's node confirms every earlier session's
+  process closed and holds the attachment (the station is attached again when
+  it does not, or when its certificate is ending). A superseded remote
+  attempt, and one an operator settles, detach too. A boot or reconnect close
+  of an orphaned agent process the node did not confirm now keeps its marker,
+  so it is closed again. A detach that did not
+  confirm keeps the station busy until the detach sweep, every five minutes
+  with the bench clearing, gets an answer from the agent's node. A failing
+  re-attach after a dirty tree waits a minute between tries.
+- Node verbs `bench.identity.ensure` and `bench.remote.attach|detach|status`,
+  advertised as `bench.remote.attach`: a Hermes station gets its own bench SSH
+  key (private half on the node only), and attach writes the bench certificate
+  beside it, pins the bench host key in the `known_hosts` file ssh itself names
+  for the bench (`ssh -G`; refused `unavailable`, with nothing written, when
+  that is `none`, `/dev/null`, a symlink or behind a `HostKeyAlias`) and
+  points the profile's `terminal:` section at the bench, `cwd` included.
+  Detach restores `config.yaml` and `known_hosts` byte for byte (a
+  `known_hosts` the attach created is removed again), or leaves a
+  terminal section someone else has since changed (`terminal_changed`). Attach
+  refuses a profile that would copy credential files to the bench, or one
+  without `agentpod-live` 0.3.0 or later enabled (`plugin_missing`). It
+  journals before its first edit, so an attach a crash left half done is undone
+  by the sweep, which also detaches five minutes after a certificate lapses.
+  Neither verb restarts the gateway.
+- `fleet bridge checkpoint-detached ATTEMPT --evidence TEXT` (`POST
+  /api/admin/checkpoint/attempts/:id/detached`, workspace owners and admins):
+  the escape for a detach the station's node refuses for ever, which keeps an
+  ended remote attempt's station busy. After restoring the station's terminal
+  by hand, the operator records the detach as confirmed; the hub asks no node,
+  audits the evidence, and refuses an attempt still in progress.
+- `agentpod-live` 0.3.0: while its profile is attached to a remote bench, the
+  plugin rewrites replace-mode `patch` calls into the equivalent V4A patch (the
+  only form ACP edit approval can preview remotely), blocks `replace_all` with
+  a hint toward V4A, and tells each new session which bench and directory it
+  works in.
+- A remote bench stage that fails, or whose run ends, after its agent changed the
+  bench: the bench host's node checkpoints a clean tree before it releases the
+  lease, so the agent's commits are kept (the card still reports the failure).
+  A dirty tree is never discarded. The attempt waits `remote.held_dirty`,
+  keeps its station busy, says on the card (once per hub process) that the
+  bench needs an operator (stop_admin, renew_admin, run, release), and ends as usual once an
+  operator has released the lease. A SuperBench release that discards a dirty
+  tree is not built yet. New page: "Remote bench stages".
+
+### Changed
+
+- While a station is attached to a remote bench, resuming its turn after a hub
+  restart, or retiring its attempt, closes every session on that station,
+  including a workspace admin's Console chat.
+- While a remote bench stage holds a station (from its claim until its detach
+  is confirmed), the hub opens no other session on it: a Console chat is
+  refused 409 `station_in_bench`, a Matrix room is told "This station is working
+  in a card's bench; try again when the stage finishes.", and an editor's ACP
+  proxy open is refused the same way. Only the stage's own turn opens. Sessions
+  that Hermes's own messaging platforms open are outside the hub and share the
+  bench; turn those platforms off on a station that serves remote stages.
+
+### Fixed
+
+- A remote stage whose attempt failed on the station's node or in the hub
+  (an attach refused for `credential_files`, say) no longer leaves the bench
+  lease held. The bench host's node is told, and the hub's decision answers
+  `stale_owner` for a failing or failed remote attempt.
+- A remote stage's run the board ended (a card moved, a run reclaimed) no
+  longer leaves the bench leased: the hub's decision now answers the bench
+  node's status `stale_owner` once the board says the run ended.
+- `bench.reclaim` clears a settled remote stage's bench. It answered
+  `unsupported` for every remote stage, so finished cards kept their benches
+  until capacity ran out.
+- A retired remote record never checkpoints a stopped lease, which left the
+  checkpoint pending and the bench unrecoverable by `renew_admin`.
+- A failure closed `run_ended` no longer fails on the board's null fields
+  (`INVALID_CHECKPOINT`), which kept a released attempt open.
+- A remote turn in `ask` or `accept-edits` mode waits for its question's answer
+  instead of ending `unanswered` a second after asking. While a question is
+  open the board shows the run waiting, which the checkpoint context check
+  refused; the turn now reads its run's questions from the run view. Why a
+  question ended the turn unanswered is logged.
+
 ## v0.1.133 — 2026-11-24
 
 ### Added

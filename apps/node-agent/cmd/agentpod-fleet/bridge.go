@@ -125,6 +125,8 @@ func fleetBridge(args []string) {
 		fleetGet("/api/admin/checkpoint/attempts", args)
 	case "checkpoint-settle":
 		fleetBridgeCheckpointSettle(args[1:])
+	case "checkpoint-detached":
+		fleetBridgeCheckpointDetached(args[1:])
 	default:
 		fmt.Fprintln(os.Stderr, fleetcli.BridgeUsage)
 		os.Exit(2)

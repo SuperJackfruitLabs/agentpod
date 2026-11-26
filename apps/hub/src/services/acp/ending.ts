@@ -1,12 +1,16 @@
 /** Ending a session on request: its owner's end, and a workspace admin's. */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, ne, or } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { acpSessions } from "../../db/schema/acp";
+import { stations } from "../../db/schema/stations";
+import * as broker from "../broker";
+import { connectionManager } from "../broker";
 import { revokeSalaamExecution } from "../salaam";
 import { finalizeEnd } from "./end";
 import { appendEndedState } from "./events";
-import { liveById } from "./session-state";
+import { log } from "./log";
+import { isNodeSessionIdLive, liveById } from "./session-state";
 import { sessionLockKey, withStationOpenLock } from "./timing";
 
 export async function endSession(
@@ -71,4 +75,57 @@ export async function endSessionAsWorkspaceAdmin(
     if (restored) await finalizeEnd(restored, reason, "admin");
   }
   return { userId: row.userId, stationId: row.stationId };
+}
+
+/** How long a confirmed close waits on the node: a local process stop there. */
+export const CONFIRMED_CLOSE_TIMEOUT_MS = 10_000;
+
+/**
+ * End every session on a station and confirm that no agent process any of them started is still
+ * running, for a caller that must never let two sessions work in one place (a remote bench stage,
+ * whose sessions all work in one bench, before it opens a fresh one after a hub restart).
+ *
+ * - Each session not yet ended is ended here (`endSession`, live or not).
+ * - Each session whose row still names its node process (`node_session_id`: one not yet closed, or
+ *   an orphan a hub restart left) gets an awaited `acp.close`. The node answers ok once the process
+ *   is gone, or was never there; only that answer clears the marker.
+ * - An ended row that names no node process left was closed already.
+ *
+ * True only when every one is confirmed. A station that is gone, a node that is offline or does
+ * not answer, or a process another live session still holds is not a confirmation.
+ */
+export async function closeStationSessions(tenantId: string, stationId: string, reason: string): Promise<boolean> {
+  const [station] = await db.select({ nodeId: stations.nodeId }).from(stations)
+    .where(and(eq(stations.id, stationId), eq(stations.tenantId, tenantId)));
+  if (!station) return false;
+  const rows = await db.select({ id: acpSessions.id, userId: acpSessions.userId, status: acpSessions.status,
+    nodeSessionId: acpSessions.nodeSessionId }).from(acpSessions)
+    .where(and(eq(acpSessions.tenantId, tenantId), eq(acpSessions.stationId, stationId),
+      or(ne(acpSessions.status, "ended"), isNotNull(acpSessions.nodeSessionId))));
+  let confirmed = true;
+  // Every session ends first, so a process a sibling on this station held is free to close below.
+  for (const row of rows) {
+    if (row.status === "ended" && !liveById.has(row.id)) continue;
+    try { await endSession(row.userId, row.id, reason); }
+    catch (error) {
+      confirmed = false;
+      log.warn("ACP station close: a session could not be ended", { sessionId: row.id, stationId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  for (const row of rows) {
+    const proc = row.nodeSessionId;
+    if (!proc) continue;
+    if (isNodeSessionIdLive(station.nodeId, proc) || !connectionManager.isOnline(station.nodeId)) { confirmed = false; continue; }
+    const closed = await broker.request(station.nodeId, "acp.close", { sessionId: proc }, { timeoutMs: CONFIRMED_CLOSE_TIMEOUT_MS });
+    if (!closed.ok) {
+      confirmed = false;
+      log.warn("ACP station close: the node did not confirm a process closed", { sessionId: row.id, stationId,
+        nodeSessionId: proc, error: closed.error });
+      continue;
+    }
+    await db.update(acpSessions).set({ nodeSessionId: null })
+      .where(and(eq(acpSessions.id, row.id), eq(acpSessions.nodeSessionId, proc)));
+  }
+  return confirmed;
 }

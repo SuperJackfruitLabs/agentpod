@@ -102,7 +102,7 @@ import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/index.ts';
 import { enabledProviders } from './services/provisioner/index.ts';
 import { startNodeSweeper } from './services/sweeper/index.ts';
-import { installStageProfilesAtStartup, startSuperpipelineBridge } from './services/bridge/index.ts';
+import { installStageProfilesAtStartup, startSuperpipelineBridge, stationBenchBusy } from './services/bridge/index.ts';
 import { createEventReceipts, isBridgeEnabled, loadBridgeConfig, superpipelineRelayFromEnv } from './services/bridge/index.ts';
 import { createGracefulShutdown } from './services/hub/index.ts';
 import { httpServerSpans } from './telemetry/http-middleware.ts';
@@ -124,7 +124,7 @@ import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
 import { createMissionRoutes } from './routes/missions.ts';
 // ACP session boot reconciliation (hub-owned sessions do not survive restarts)
-import { reconcileOnBoot as reconcileAcpSessions } from './services/acp/index.ts';
+import { reconcileOnBoot as reconcileAcpSessions, setStationHold } from './services/acp/index.ts';
 
 validateConfig();
 
@@ -162,6 +162,10 @@ if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offlin
 // Mark ACP sessions from before the restart ended + best-effort close orphaned
 // agent processes on nodes that are already back online.
 await reconcileAcpSessions();
+
+// No session opens on a station a remote bench stage holds, except that stage's own turn: its
+// terminal may point at the card's bench. Asked by every open, under the station's open lock.
+setStationHold(stationBenchBusy);
 
 const errorLogger = createLogger('error-handler');
 

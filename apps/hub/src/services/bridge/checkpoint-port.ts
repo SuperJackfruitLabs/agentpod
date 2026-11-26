@@ -12,7 +12,8 @@ import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint
 import { checkpointDriveDeps, driveCheckpointAttempt, endEndedRun, RUN_ENDABLE_PHASES } from "./checkpoint-orchestrator";
 import { capacityHold, createCapacityBackoff } from "./checkpoint-capacity-backoff";
 import { readRunEnded } from "./checkpoint-run-ended";
-import { resolveSupersededAttempt } from "./checkpoint-supersede";
+import { defaultSupersedeDeps, resolveSupersededAttempt } from "./checkpoint-supersede";
+import { endRemoteWork } from "./checkpoint-remote";
 import { createAttemptBackoff } from "./checkpoint-recover-backoff";
 import { createLogger } from "../../utils/logger";
 import { createQuietLog } from "./quiet-log";
@@ -27,6 +28,7 @@ import type { CheckpointDispatchPort, CheckpointTarget } from "./checkpoint-disp
 import type { SuperpipelineClient } from "./superpipeline";
 import { nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
+import type { RemoteTurnDeps } from "./checkpoint-remote-turn";
 
 function target(profile: CheckpointProfile): CheckpointTarget {
   const t = profile.target;
@@ -70,9 +72,10 @@ function installedFor(tenantId: string, boardId: string, stationId: string, agen
 /** Called for the actual selected roster row. No ACP readiness, station label,
  * caller URL, or advertised health is used to infer this installation.
  */
-export function checkpointRuntime(tenantId: string, boardId: string, stationId: string, agentKey: string): CheckpointRuntime | undefined {
+export function checkpointRuntime(tenantId: string, boardId: string, stationId: string, agentKey: string,
+  remote?: RemoteTurnDeps): CheckpointRuntime | undefined {
   const found = installedFor(tenantId, boardId, stationId, agentKey);
-  return found ? runtimeFor(found, tenantId, boardId, stationId) : undefined;
+  return found ? runtimeFor(found, tenantId, boardId, stationId, remote) : undefined;
 }
 
 /**
@@ -86,24 +89,26 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
  * cycle's start. A cycle never swaps the port it is using, and an attempt reserved under the old
  * profile is found by the new runtime's `recover` as superseded and resolved by that path.
  */
-export function checkpointRuntimeResolver(tenantId: string, boardId: string, stationId: string, agentKey: string):
-  () => CheckpointRuntime | undefined {
+export function checkpointRuntimeResolver(tenantId: string, boardId: string, stationId: string, agentKey: string,
+  remote?: RemoteTurnDeps): () => CheckpointRuntime | undefined {
   let cached: { pin: string; runtime: CheckpointRuntime } | undefined;
   return () => {
     const found = installedFor(tenantId, boardId, stationId, agentKey);
     if (!found) { cached = undefined; return undefined; }
     const pin = canonicalCheckpoint(found);
-    if (cached?.pin !== pin) cached = { pin, runtime: runtimeFor(found, tenantId, boardId, stationId) };
+    if (cached?.pin !== pin) cached = { pin, runtime: runtimeFor(found, tenantId, boardId, stationId, remote) };
     return cached.runtime;
   };
 }
 
-function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: string, stationId: string): CheckpointRuntime {
+/** `remote`: the station's ACP port and roster row, which a remote bench stage's turn runs on. */
+function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: string, stationId: string,
+  remote?: RemoteTurnDeps): CheckpointRuntime {
   const selected = target(profile);
   const backoff = createAttemptBackoff();
   /** After a capacity refusal this station's checkpoint claims wait, growing per card and bounded. */
   const capacity = createCapacityBackoff();
-  const deps = checkpointDriveDeps({ capacity });
+  const deps = checkpointDriveDeps({ capacity, ...(remote ? { remote: { turn: remote } } : {}) });
   async function refusal(value: CheckpointTarget): Promise<CheckpointRefusalReason | undefined> {
     try {
       if (canonicalCheckpoint(value) !== canonicalCheckpoint(selected)) return "selection.target";
@@ -193,7 +198,9 @@ function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: strin
         // Made under a profile this installation has replaced: it can never be driven again, only
         // resolved. Retired with the node's evidence when that proves nothing is outstanding;
         // otherwise parked, named, for an owner or admin to settle (`/api/admin/checkpoint/attempts`).
-        const resolution = await resolveSupersededAttempt(attempt);
+        // A remote stage's agent stops: its session is ended and its station detached.
+        const resolution = await resolveSupersededAttempt(attempt, { ...defaultSupersedeDeps,
+          detach: (a) => endRemoteWork(a, deps, "The bench stage's profile was replaced.") });
         const meta = { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
           attemptId: attempt.row.attemptId, phase: attempt.row.phase, reason: resolution.reason,
           ...(resolution.outcome === "parked" && resolution.error ? resolution.error : {}) };

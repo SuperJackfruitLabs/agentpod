@@ -1,0 +1,160 @@
+package benchattach
+
+import (
+	"fmt"
+	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
+)
+
+// The bench's host key is pinned as one managed line in the known_hosts file ssh names for the bench
+// (SSHKnownHosts), followed by a marker comment that names whose it is:
+//
+//	[100.64.0.1]:2222 ssh-ed25519 AAAA...
+//	# agentpod-bench <stationID> <attemptID>
+//
+// It must be there before Hermes first connects: Hermes runs ssh with
+// StrictHostKeyChecking=accept-new, which refuses a key that differs from a pinned one but trusts
+// whatever answers first when nothing is pinned. Every other line in the file is the user's and is
+// kept byte for byte.
+
+const markerPrefix = "# agentpod-bench "
+
+func marker(stationID, attemptID string) string { return markerPrefix + stationID + " " + attemptID }
+
+// hostPattern is the known_hosts name ssh looks up for address: bare for port 22, [host]:port
+// otherwise.
+//
+// The host must be an IP address or a strict hostname. It is written into known_hosts, where a
+// comma, a wildcard (`*`, `?`), a negation (`!`), a marker (`@cert-authority`), whitespace or a
+// line break would widen the pin to other hosts or add a line of the caller's choosing.
+func hostPattern(address string) (host string, port int, pattern string, err error) {
+	h, p, err := net.SplitHostPort(address)
+	if err != nil || h == "" {
+		return "", 0, "", fmt.Errorf("address %q is not host:port", address)
+	}
+	if !validHost(h, strings.HasPrefix(address, "[")) {
+		return "", 0, "", fmt.Errorf("address %q does not name an IP address or a hostname", address)
+	}
+	if _, scanErr := fmt.Sscanf(p, "%d", &port); scanErr != nil || port < 1 || port > 65535 || fmt.Sprint(port) != p {
+		return "", 0, "", fmt.Errorf("address %q has no valid port", address)
+	}
+	if port == 22 {
+		return h, port, h, nil
+	}
+	return h, port, "[" + h + "]:" + p, nil
+}
+
+// hostnameLabel is one LDH label: letters, digits and inner hyphens, at most 63 long.
+var hostnameLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+// validHost accepts an IPv4 address, an IPv6 address only in brackets and with no zone, or a
+// hostname of LDH labels no longer than 253 characters.
+func validHost(h string, bracketed bool) bool {
+	if ip, err := netip.ParseAddr(h); err == nil {
+		if ip.Zone() != "" {
+			return false
+		}
+		return ip.Is4() == !bracketed
+	}
+	if bracketed || len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if !hostnameLabel.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func pinLine(address, hostKey string) (string, error) {
+	_, _, pattern, err := hostPattern(address)
+	if err != nil {
+		return "", err
+	}
+	return pattern + " " + hostKey, nil
+}
+
+// pin appends the managed pair, first dropping any pair this station already had.
+func pin(path, stationID, attemptID, line string) error {
+	data, mode, err := readKnownHosts(path)
+	if err != nil {
+		return err
+	}
+	text := string(unmanage(data, stationID, "", ""))
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	if strings.ContainsAny(line, "\r\n") || strings.ContainsAny(stationID+attemptID, " \r\n") {
+		return fmt.Errorf("benchattach: refusing a known_hosts pin that is not one line")
+	}
+	text += line + "\n" + marker(stationID, attemptID) + "\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("benchattach: creating %s: %w", filepath.Dir(path), err)
+	}
+	return hostfs.AtomicWriteFile(path, []byte(text), mode)
+}
+
+// unpin removes this attempt's marker and, when it is the line just above, the pinned line; nothing
+// else.
+func unpin(path, stationID, attemptID, line string) error {
+	data, mode, err := readKnownHosts(path)
+	if err != nil || data == nil {
+		return err
+	}
+	out := unmanage(data, stationID, attemptID, line)
+	if string(out) == string(data) {
+		return nil
+	}
+	return hostfs.AtomicWriteFile(path, out, mode)
+}
+
+// unmanage drops each marker for stationID (and attemptID, when given) with the line before it:
+// that line exactly when line is given, else any host line (a leftover from an attach that never
+// finished).
+func unmanage(data []byte, stationID, attemptID, line string) []byte {
+	lines := strings.SplitAfter(string(data), "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		fields := strings.Fields(strings.TrimPrefix(strings.TrimRight(l, "\r\n"), markerPrefix))
+		mine := strings.HasPrefix(l, markerPrefix) && len(fields) == 2 && fields[0] == stationID &&
+			(attemptID == "" || fields[1] == attemptID)
+		if !mine {
+			out = append(out, l)
+			continue
+		}
+		if n := len(out); n > 0 && pinned(out[n-1], line) {
+			out = out[:n-1]
+		}
+	}
+	return []byte(strings.Join(out, ""))
+}
+
+func readKnownHosts(path string) ([]byte, os.FileMode, error) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, 0o600, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("benchattach: reading known_hosts: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("benchattach: reading known_hosts: %w", err)
+	}
+	return data, info.Mode().Perm(), nil
+}
+
+func pinned(l, line string) bool {
+	l = strings.TrimRight(l, "\r\n")
+	if line != "" {
+		return l == line
+	}
+	return strings.TrimSpace(l) != "" && !strings.HasPrefix(strings.TrimSpace(l), "#")
+}
