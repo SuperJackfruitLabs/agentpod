@@ -28,7 +28,7 @@ function homeserver(answer: (n: number) => { status: number; body: Record<string
     calls.push({
       url: String(url),
       method: init?.method ?? "GET",
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
       auth: new Headers(init?.headers).get("Authorization"),
     });
     const { status, body } = answer(calls.length);

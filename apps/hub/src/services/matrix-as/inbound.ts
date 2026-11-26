@@ -66,6 +66,7 @@ import {
 } from "./voice";
 import { MAX_VOICE_SECONDS, type Transcriber } from "../speech";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
+import { spokenPrompt, spokenTurn } from "./call-turns";
 import { SESSION_BUSY_MESSAGE, STATION_IN_BENCH_MESSAGE, isStationInBench } from "../acp";
 
 const log = createLogger("matrix-inbound");
@@ -231,12 +232,14 @@ export interface InboundDeps {
    * Which message started the turn about to run, so the agent can mark it —
    * 👀 while working, ✅ when done. Absent for a turn nobody asked for.
    */
-  noteTrigger?(sessionId: string, eventId: string, opts?: { voice?: boolean }): void;
+  noteTrigger?(sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }): void;
   /**
    * Take back a noted trigger whose prompt did not go out, so the next turn —
    * somebody else's — does not claim this message's marks and voice flag.
    */
   forgetTrigger?(sessionId: string, eventId: string): void;
+  /** Spoken turns (superdial) whose prompt could not reach the agent: the call is told so. */
+  unansweredCallTurns?(roomId: string, turnIds: string[]): void;
 }
 
 /** The room, its station, and the node name that station's identity is built from. */
@@ -755,7 +758,9 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // read what was posted in it — and decrypted when the room is encrypted.
   // One that cannot be had still reaches the agent, as a note saying why,
   // rather than as a file name it would try to interpret.
-  let prompt = text;
+  // A message spoken in a superdial call (C3), for this room's agent: prefixed like a voice note.
+  const spoken = image || audio ? null : spokenTurn(event.content, agentUser);
+  let prompt = spoken ? spokenPrompt(text) : text;
   const images: PromptImage[] = [];
   if (image) {
     const download = deps.client.downloadMedia;
@@ -818,6 +823,7 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     images,
     ...(event.event_id ? { eventId: event.event_id } : {}),
     ...(audio ? { voice: true } : {}),
+    ...(spoken ? { callTurns: [spoken.turnId] } : {}),
   };
   // Mid-turn is not a refusal. The message waits and goes with the next turn
   // — see `RoomQueue`. Only a hub that cannot tell when a turn ends refuses.
@@ -891,11 +897,9 @@ async function dispatchTurn(
       // One session per room, not per message: a conversation is a
       // conversation, and a session per message would throw away the agent's
       // context between two consecutive sentences.
-      // The station's OWNER, not the sender's principal: the session is the
-      // owner's (sessions stay a person's own, W4), and it opens in the
-      // station's tenant. It once mattered for the lookup too: `getStation`
-      // scoped on `stations.user_id`, so a `prn_…` matched no row and every
-      // bridged room failed with "Station not found.".
+      // The station's OWNER, not the sender's principal: the session is the owner's (sessions
+      // stay a person's own, W4), and it opens in the station's tenant. `getStation` once scoped
+      // on `stations.user_id`, so a `prn_…` matched no row: "Station not found.".
       //
       // Authorisation still belongs to the principal: the control-pair check
       // in `handleRoomMessage` is what decides whether this sender may dispatch
@@ -923,18 +927,14 @@ async function dispatchTurn(
     // a stream nobody is listening to.
     deps.attach(sessionId, room.roomId, agentUser);
     if (turn.eventId && deps.noteTrigger) {
-      deps.noteTrigger(sessionId, turn.eventId, { voice: turn.voice === true });
+      const callTurns = turn.callTurns ? { callTurns: turn.callTurns } : {};
+      deps.noteTrigger(sessionId, turn.eventId, { voice: turn.voice === true, ...callTurns });
       noted = { sessionId, eventId: turn.eventId };
     }
 
-    // The user's words, unchanged. Trimming or decorating them would put the
-    // bridge's voice into the agent's input.
-    // The owner again, not the principal: `promptSession` resolves the live
-    // session with `requireLive(userId, sessionId)`. Passing a `prn_…` meant
-    // the session was created correctly and then could not be prompted —
-    // "Session not found or not active." The same defect as the station
-    // lookup, one call later; it survived the first fix because only the
-    // createSession site was corrected.
+    // The prompt as built above, unchanged here. The owner again, not the principal:
+    // `promptSession` resolves the live session with `requireLive(userId, sessionId)`, and a
+    // `prn_…` made a correctly created session unpromptable ("Session not found or not active").
     await deps.acp.promptSession(room.stationUserId, sessionId, turn.text, turn.images);
     return "sent";
   } catch (err) {
@@ -944,6 +944,7 @@ async function dispatchTurn(
     // Lost the race between the check above and the prompt: another message
     // started a turn in between. Waiting is still the answer.
     if (reason === SESSION_BUSY_MESSAGE) return "busy";
+    if (turn.callTurns) deps.unansweredCallTurns?.(room.roomId, turn.callTurns);
     // A remote bench stage holds the station: not a failure to reach it, and nothing to wait on.
     if (isStationInBench(err)) {
       await notice(deps, agentUser, room.roomId, STATION_IN_BENCH_MESSAGE);

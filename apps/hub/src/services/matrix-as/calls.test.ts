@@ -118,3 +118,51 @@ describe("a cancel from superdial-agent", () => {
     expect(cancels).toEqual([]);
   });
 });
+
+describe("a spoken turn's reply", () => {
+  test("goes to the call once, final, with the whole text", async () => {
+    const { calls, replies } = harness();
+    noteCallTurns("acps_1", [TURN]);
+    await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "It is ten past four.", errored: false });
+    expect(replies).toEqual([
+      { roomId: ROOM, turnId: TURN, body: { seq: 0, text: "It is ten past four.", final: true, outcome: "ok" } },
+    ]);
+  });
+
+  test("a turn cancelled at hang-up is answered cancelled; an error turn, error", async () => {
+    const { calls, replies } = harness();
+    noteCallTurns("acps_1", ["t-cancelled", "t-error"]);
+    await calls.cancelTurn("t-cancelled", ROOM);
+    await calls.replyToCall({ roomId: ROOM, turnIds: ["t-cancelled"], text: "Partial", errored: false });
+    await calls.replyToCall({ roomId: ROOM, turnIds: ["t-error"], text: "", errored: true });
+    expect(replies.map((r) => [r.turnId, r.body.outcome])).toEqual([
+      ["t-cancelled", "cancelled"],
+      ["t-error", "error"],
+    ]);
+  });
+
+  test("merged spoken turns: the last is answered, the earlier ones are closed as cancelled with no text", async () => {
+    // One answer, spoken once. Each earlier turn still hears back, or superdial-agent waits for ever.
+    const { calls, replies } = harness();
+    noteCallTurns("acps_1", ["t-1", "t-2"]);
+    await calls.replyToCall({ roomId: ROOM, turnIds: ["t-1", "t-2"], text: "Both, briefly.", errored: false });
+    expect(replies).toEqual([
+      { roomId: ROOM, turnId: "t-1", body: { seq: 0, text: "", final: true, outcome: "cancelled" } },
+      { roomId: ROOM, turnId: "t-2", body: { seq: 0, text: "Both, briefly.", final: true, outcome: "ok" } },
+    ]);
+  });
+
+  test("a turn that never reached the agent is answered error, with no text", async () => {
+    const { calls, replies } = harness();
+    await calls.replyUnanswered(ROOM, [TURN]);
+    expect(replies).toEqual([{ roomId: ROOM, turnId: TURN, body: { seq: 0, text: "", final: true, outcome: "error" } }]);
+  });
+
+  test("once answered, a turn can no longer be cancelled", async () => {
+    const { calls, cancels } = harness();
+    noteCallTurns("acps_1", [TURN]);
+    await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "Done.", errored: false });
+    await calls.cancelTurn(TURN, ROOM);
+    expect(cancels).toEqual([]);
+  });
+});

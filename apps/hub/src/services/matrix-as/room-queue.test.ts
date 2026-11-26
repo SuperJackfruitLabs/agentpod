@@ -61,6 +61,18 @@ describe("mergeQueued", () => {
     ).toEqual({ text: "[Voice note] hi\n\nand this", images: [], eventId: "$t", voice: true });
     expect(mergeQueued([{ text: "typed", images: [], eventId: "$t" }]).voice).toBeUndefined();
   });
+
+  test("every spoken turn among them is carried, in the order spoken", () => {
+    // Each was given an id by the call; each must hear back, or superdial-agent waits for ever.
+    expect(
+      mergeQueued([
+        { text: "[Spoken] one", images: [], eventId: "$1", callTurns: ["turn-1"] },
+        { text: "typed", images: [], eventId: "$2" },
+        { text: "[Spoken] two", images: [], eventId: "$3", callTurns: ["turn-2"] },
+      ]).callTurns
+    ).toEqual(["turn-1", "turn-2"]);
+    expect(mergeQueued([{ text: "typed", images: [], eventId: "$t" }]).callTurns).toBeUndefined();
+  });
 });
 
 describe("RoomQueue", () => {

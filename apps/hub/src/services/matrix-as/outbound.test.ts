@@ -7,7 +7,7 @@ import {
 import { _resetHubEventsForTest, hubEventKind, hubEventTurn, quietSendsInFlight } from "../push/hub-events";
 import { clearPendingPermission, matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 import { setFleetSink } from "../push/fleet/sink";
-import type { OutboundDeps } from "./outbound-state";
+import type { CallTurnReply, OutboundDeps } from "./outbound-state";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
@@ -2052,5 +2052,93 @@ describe("a turn the safety timer flushed before its end", () => {
 
     expect(messages().map((m) => m.body)).toEqual(["first turn", "second turn"]);
     expect(edits()).toHaveLength(0);
+  });
+});
+
+/**
+ * A turn spoken in a superdial call: its reply goes to the call, once, when the turn ends, and the
+ * voice-note reply is skipped (the call speaks it; a voice message as well would say it twice).
+ * The room still gets the answer as an ordinary message.
+ */
+describe("a spoken turn's end hands its text to the call", () => {
+  let replies: CallTurnReply[] = [];
+  let spoken: unknown[] = [];
+
+  function callDeps() {
+    let n = 0;
+    const base = deps();
+    return {
+      ...base,
+      client: {
+        ...base.client,
+        sendText: async (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) => {
+          sent.push({ userId, roomId, body, ...(extra ? { extra } : {}) });
+          n += 1;
+          return `$text${n}`;
+        },
+      },
+      speak: async (turn: unknown) => void spoken.push(turn),
+      callReply: async (reply: CallTurnReply) => void replies.push(reply),
+    };
+  }
+
+  beforeEach(() => {
+    replies = [];
+    spoken = [];
+  });
+
+  test("the whole reply, once the turn is idle, and no voice note", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, callDeps());
+    noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });
+    emit(state("working", 1));
+    emit(chunk("It is "));
+    emit(chunk("ten past four."));
+    emit(state("idle", 2));
+    await settle();
+    expect(replies).toEqual([{ roomId: ROOM, turnIds: ["turn-1"], text: "It is ten past four.", errored: false }]);
+    expect(spoken).toEqual([]);
+    expect(sent.map((s) => s.body)).toContain("It is ten past four.");
+  });
+
+  test("an error turn is handed over as errored", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, callDeps());
+    noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });
+    emit(state("working", 1));
+    emit({ sessionId: SESSION, seq: 2, type: "error", payload: { message: "quota" }, createdAt: new Date().toISOString() });
+    emit(state("idle", 3));
+    await settle();
+    expect(replies).toEqual([{ roomId: ROOM, turnIds: ["turn-1"], text: "", errored: true }]);
+  });
+
+  test("a turn that said nothing is errored; one that chose silence is not", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, callDeps());
+    noteTurnTrigger(SESSION, "$a", { callTurns: ["turn-a"] });
+    emit(state("working", 1));
+    emit(state("idle", 2));
+    await settle();
+    noteTurnTrigger(SESSION, "$b", { callTurns: ["turn-b"] });
+    emit(state("working", 3));
+    emit({ sessionId: SESSION, seq: 4, type: "state", payload: { status: "idle", silent: true }, createdAt: new Date().toISOString() });
+    await settle();
+    expect(replies.map((r) => [r.turnIds, r.errored])).toEqual([
+      [["turn-a"], true],
+      [["turn-b"], false],
+    ]);
+  });
+
+  test("a typed turn after a spoken one is spoken by the voice replier as before, not sent to the call", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, callDeps());
+    noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });
+    emit(state("working", 1));
+    emit(chunk("one"));
+    emit(state("idle", 2));
+    await settle();
+    noteTurnTrigger(SESSION, "$typed");
+    emit(state("working", 3));
+    emit(chunk("two"));
+    emit(state("idle", 4));
+    await settle();
+    expect(replies).toHaveLength(1);
+    expect(spoken).toHaveLength(1);
   });
 });

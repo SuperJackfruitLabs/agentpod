@@ -35,14 +35,14 @@ function member(opts: { sender?: string; device?: string; content?: Record<strin
     state_key: opts.stateKey ?? `_${sender}_${device}_m.call`,
     content:
       opts.content ??
-      ({
+      {
         application: "m.call",
         call_id: "",
         scope: "m.room",
         device_id: device,
         focus_active: { type: "livekit", focus_selection: "oldest_membership" },
         foci_preferred: [{ type: "livekit", livekit_service_url: "https://lk.example" }],
-      } as Record<string, unknown>),
+      },
   };
 }
 

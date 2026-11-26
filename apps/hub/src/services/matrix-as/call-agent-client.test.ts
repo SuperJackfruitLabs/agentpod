@@ -19,7 +19,7 @@ function agent(status = 204) {
       method: init?.method ?? "GET",
       auth: headers.get("Authorization"),
       type: headers.get("Content-Type"),
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
     });
     return new Response(null, { status });
   }) as unknown as typeof globalThis.fetch;
@@ -64,9 +64,9 @@ describe("the superdial-agent client", () => {
     const down = createSuperdialAgentClient({
       baseUrl: "http://agent.test",
       token: "loopback",
-      fetch: (async () => {
+      fetch: async () => {
         throw new Error("connection refused");
-      }) as unknown as typeof globalThis.fetch,
+      },
     });
     expect(await down.leaveCall(ROOM)).toBe(false);
   });

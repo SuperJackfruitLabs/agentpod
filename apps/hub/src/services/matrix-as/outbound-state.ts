@@ -91,6 +91,29 @@ export interface OutboundDeps {
    * Optional: without it replies are text only, as before.
    */
   speak?: (turn: SpokenTurn) => Promise<unknown>;
+  /**
+   * Hand a spoken turn's reply to the superdial call it came from (`calls.ts`), in place of the
+   * voice-note reply. Called — never awaited — once per turn that a call started, when it ends.
+   * `errored`: it ended in an error, or said nothing without choosing to. Optional: without it a
+   * spoken turn is answered like a typed one.
+   */
+  callReply?: (reply: CallTurnReply) => Promise<unknown>;
+}
+
+/** A spoken turn's reply, for the call: every turn id it answers (several when merged). */
+export interface CallTurnReply {
+  roomId: string;
+  turnIds: string[];
+  text: string;
+  errored: boolean;
+}
+
+/** The message that started a turn, as noted before the prompt and taken on `working`. */
+export interface NotedTrigger {
+  eventId: string;
+  voice: boolean;
+  /** superdial turn ids, when the message was spoken in a call. */
+  callTurns?: string[];
 }
 
 export interface Attachment {
@@ -190,6 +213,8 @@ export interface Attachment {
   open: { eventId: string; text: string } | null;
   /** Whether a voice note from the user started this turn. */
   voiceTriggered: boolean;
+  /** The superdial turn ids this turn answers; empty for a turn no call started. */
+  callTurns: string[];
   /**
    * The previous event's handling, which the next one waits for — see
    * `EVENT_ORDER_WAIT_MS`.
@@ -296,15 +321,23 @@ export const SILENT_TURN_NOTICE =
  * Set by the inbound path before it prompts. Kept outside the attachment because
  * a turn can be noted before the room is attached — and cleared with it.
  */
-const triggers = new Map<string, { eventId: string; voice: boolean }>();
+const triggers = new Map<string, NotedTrigger>();
 
 /**
  * Note which message started the next turn on this session, and whether it
  * was a voice note — a station set to answer voice with voice speaks only
  * those turns.
  */
-export function noteTurnTrigger(sessionId: string, eventId: string, opts: { voice?: boolean } = {}): void {
-  triggers.set(sessionId, { eventId, voice: opts.voice === true });
+export function noteTurnTrigger(
+  sessionId: string,
+  eventId: string,
+  opts: { voice?: boolean; callTurns?: string[] } = {},
+): void {
+  triggers.set(sessionId, {
+    eventId,
+    voice: opts.voice === true,
+    ...(opts.callTurns && opts.callTurns.length > 0 ? { callTurns: [...opts.callTurns] } : {}),
+  });
 }
 
 /**
@@ -320,7 +353,7 @@ export function forgetTurnTrigger(sessionId: string, eventId: string): void {
  * Taken, not read: a trigger belongs to the one turn it started. Left in the
  * map, a later turn nobody asked for would mark it again.
  */
-export function takeTrigger(sessionId: string): { eventId: string; voice: boolean } | undefined {
+export function takeTrigger(sessionId: string): NotedTrigger | undefined {
   const noted = triggers.get(sessionId);
   triggers.delete(sessionId);
   return noted;
@@ -362,6 +395,7 @@ export function newAttachment(roomId: string, agentUser: string): Attachment {
     turnTextEventId: null,
     open: null,
     voiceTriggered: false,
+    callTurns: [],
     chain: Promise.resolve(),
   };
 }

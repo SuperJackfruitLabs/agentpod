@@ -11,6 +11,29 @@
  * nothing, which is the truth.
  */
 
+import { SPOKEN_KEY, SPOKEN_PROMPT_PREFIX } from "./call-config";
+
+/**
+ * The spoken turn a message carries (C3), or null for an ordinary message.
+ *
+ * Only an `m.text` whose marker names THIS room's agent and carries a non-empty `turn_id`. A
+ * marker naming another agent, or malformed, makes the message an ordinary typed one: its reply
+ * goes to the room alone, never to a call it was not asked for.
+ */
+export function spokenTurn(content: Record<string, unknown> | undefined, agentUserId: string): { turnId: string } | null {
+  if (!content || content.msgtype !== "m.text") return null;
+  const marker = content[SPOKEN_KEY];
+  if (!marker || typeof marker !== "object") return null;
+  const { turn_id: turnId, agent_user_id: agent } = marker as Record<string, unknown>;
+  if (typeof turnId !== "string" || turnId === "" || agent !== agentUserId) return null;
+  return { turnId };
+}
+
+/** What the agent reads for a spoken turn: the contract's prefix, then the words. */
+export function spokenPrompt(text: string): string {
+  return `${SPOKEN_PROMPT_PREFIX} ${text.trim()}`;
+}
+
 /** turn_id → the session it was prompted into. */
 const sessions = new Map<string, string>();
 /** turn_ids superdial-agent cancelled while they ran. */

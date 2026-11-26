@@ -76,6 +76,8 @@ import { resolveSpeechFor } from "../speech";
 import { synthesize } from "../speech";
 import { callsForBridge, type Calls } from "./calls";
 import { CALL_MEMBER_TYPE } from "./call-config";
+import { noteCallTurns } from "./call-turns";
+import type { CallTurnReply } from "./outbound-state";
 
 const log = createLogger("matrix-bridge");
 
@@ -773,9 +775,15 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
             settleFromSessionEvent(session, payload, { ...post, displayNameFor: (id) => principalLabel(id) }),
         },
         speak: voiceReplier.speakTurn,
+        // A turn spoken in a superdial call is answered to the call instead of by a voice note.
+        ...(calls ? { callReply: (reply: CallTurnReply) => calls.replyToCall(reply) } : {}),
       }),
-    noteTrigger: noteTurnTrigger,
+    noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }) => {
+      noteTurnTrigger(sessionId, eventId, opts);
+      if (calls && opts?.callTurns) noteCallTurns(sessionId, opts.callTurns);
+    },
     forgetTrigger: forgetTurnTrigger,
+    unansweredCallTurns: (roomId: string, turnIds: string[]) => void calls?.replyUnanswered(roomId, turnIds),
     displayNameFor: (principalId: string) => principalLabel(principalId),
   };
 

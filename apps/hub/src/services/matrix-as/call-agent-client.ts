@@ -50,7 +50,7 @@ const call = (roomId: string) => `/v1/calls/${pathSegment(roomId)}`;
 export function createSuperdialAgentClient(deps: {
   baseUrl: string;
   token: string;
-  fetch?: typeof globalThis.fetch;
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
 }): SuperdialAgentClient {
   const doFetch = deps.fetch ?? fetch;
   const base = deps.baseUrl.replace(/\/+$/, "");
