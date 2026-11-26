@@ -109,6 +109,10 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array,
     // (a clean tree checkpointed, then released; a dirty one held for an operator).
     if ((attempt.row.phase === "failed" || attempt.row.phase === "failure_pending") && isRemoteProfile(attempt.profile))
       return refused("stale_owner");
+    // A remote attempt's bench node asks (observe) when the hub tells it a run ended. Its source evidence
+    // still matches after the board ended the run, so the board itself is asked: an ended run is a stale
+    // owner, and the node retires its record (a clean tree saved, then released).
+    if (request.phase === "observe" && isRemoteProfile(attempt.profile) && await runEnded(attempt)) return refused("stale_owner");
     requireInstalledCheckpointProfile(attempt.profile);
     const authority = await readCheckpointAuthority(attempt.profile);
     if (!checkpointAuthorityMatches(authority, attempt.row.authority)) return refused("stale_owner");

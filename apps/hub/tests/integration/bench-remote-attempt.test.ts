@@ -146,7 +146,7 @@ function benchNodeAnswers() {
       const decided = sent.operation === "status" && seen.statusDecides
         ? await decide("attach", params, { phase: "observe", execute_request_sha256: undefined, binding_sha256: undefined }) : undefined;
       if (decided) data = decided.code === "stale_owner" ? { version: own.version, operation: "status", state: "refused", code: "stale_owner" }
-        : { ...own, state: "pending", detail: { lease: "held", message: "workspace has uncommitted or untracked files: notes.txt" } };
+        : { ...own, state: "prepared", source: completionFor.source };
       else if (sent.operation === "status" && seen.statusReply) data = { version: own.version, operation: "status", ...seen.statusReply };
       else if (sent.operation === "prepare" || sent.operation === "status") data = { ...own, state: "prepared", source: completionFor.source };
       else if (sent.operation === "attach" || sent.operation === "finish") {
@@ -568,6 +568,31 @@ test("a reclaimed run makes the bench node release and the agent's node detach",
     ({ attempt, selected } = prior);
     seen.runEnded = false; seen.statusReply = undefined;
   }
+});
+
+test("a remote run the board ended is a stale owner to its bench node's status, which releases, and the attempt retires", async () => {
+  await onRun("r8", async () => {
+    const client = await checkpointAgentClient(profile);
+    expect(await driveCheckpointAttempt(attempt, client, true, deps())).toMatchObject({ recheckMs: 5_000 });
+    expect((await stored()).phase).toBe("working");
+    const working = await readCheckpointAttempt(tenantId, attempt.row.attemptId);
+    if (!working) throw new Error("attempt missing");
+    // The agent's turn is lost; nothing heartbeats the run, and the board ends it.
+    listener?.({ sessionId: "acps_" + suffix, seq: 950, type: "error", payload: { message: "agent crashed" }, createdAt: "" });
+    listener?.({ sessionId: "acps_" + suffix, seq: 951, type: "state", payload: { status: "idle" }, createdAt: "" });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    expect(await driveCheckpointAttempt(working, client, false, deps())).toMatchObject({ status: "unreported" });
+    seen.statusDecides = true; seen.runEnded = true;
+    try {
+      // The card moved off the stage: the bench node's own status asks the hub, which must say stale_owner.
+      const parked = await readCheckpointAttempt(tenantId, working.row.attemptId);
+      if (!parked) throw new Error("attempt missing");
+      expect(await driveCheckpointAttempt(parked, client, false, deps())).toMatchObject({ status: "released" });
+      const retired = await stored();
+      expect(retired.phase).toBe("retired");
+      expect(JSON.parse(String(retired.retirement))).toMatchObject({ reason: "run_ended", phase: "working", by: "hub" });
+    } finally { seen.statusDecides = false; seen.runEnded = false; }
+  });
 });
 
 test("detach sweep retries until the agent's node answers", async () => {
