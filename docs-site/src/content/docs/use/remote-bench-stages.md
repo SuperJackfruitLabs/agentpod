@@ -34,14 +34,18 @@ Switching a stage to `remote` clears its worker and worker arguments. Switching 
   refuses with `plugin_missing` without it. While a station is attached, the plugin rewrites
   replace-mode `patch` calls to V4A patches and adds a short note to the system prompt, because
   Hermes builds a replace-mode edit's approval diff from a file on its own machine.
-  - Install it with `apn hermes-live enable --profile NAME --apply`, or from the Console's plugin
-    panel, then restart the gateway.
-  - **Not built yet:** `apn hermes-live` only handles named profiles (`~/.hermes/profiles/NAME`).
-    It cannot enable the plugin for a station whose profile is the Hermes root (`~/.hermes`).
-    For such a station, use the Console's plugin panel. That needs a principal that may change the
-    station.
-  - The installer refuses a Hermes outside the plugin's tested range. A Hermes installed from a git
-    checkout in editable mode reports its version as `0.0.0`, which the installer also refuses.
+  - For a station with a **named** profile (`~/.hermes/profiles/NAME`) on a Hermes inside the
+    plugin's tested range, install it with `apn hermes-live enable --profile NAME --apply`, then
+    restart the gateway.
+  - The Console's plugin panel is the other route. It needs `"pluginManagement": true` in the node's
+    configuration, and a principal that may change the station. It goes through the same Hermes
+    version check as `apn hermes-live`.
+  - That check refuses a Hermes outside the plugin's tested range (today, newer than 0.21.5, so
+    0.23.x is refused). It also refuses a Hermes installed from a git checkout in editable mode,
+    which reports its version as `0.0.0`.
+  - **Not built yet:** `apn hermes-live` only handles named profiles. A station whose profile is the
+    Hermes root (`~/.hermes`) has no supported install path today, and neither does a Hermes the
+    version check refuses.
 - **No credential files.** Hermes copies a profile's credential files to the remote side, and its
   own deny-list does not cover the profile's configuration list. An attach therefore refuses with
   `credential_files` when:
@@ -96,28 +100,32 @@ host's node. That node then frees the bench:
 - **A dirty tree is never discarded.** The lease stays held, and the attempt waits with the reason
   `remote.held_dirty`.
   - The attempt keeps its station busy.
-  - The card says once that the bench needs an operator, with the steps below.
+  - The card says that the bench needs an operator, with the steps below. It says so once per hub
+    process, so it can say it again after a hub restart.
   - The hub logs it at warn.
   - The hub asks the bench host's node again on later passes, and never times the wait out. Once
     an operator has released the lease, the attempt ends as usual and the station is free.
 
 ### Freeing a held bench
 
-Run these on the bench host as its operator. `KEY` is the card's bench key, which the card's
-message names.
+Run these as root on the bench host. `KEY` is the card's bench key, which the card's message
+names. `SOCKET` is benchd's socket, and `STATE`, `DATA`, `CGROUP_ROOT` and `TIMEOUT` are the
+`--state`, `--data`, `--cgroup-root` and `--mirror-timeout` that benchd itself runs with
+(SuperBench's `bench` reference, "A stopped lease that cannot release").
 
-1. `bench workspace stop_admin KEY`. The lease stays with the attempt's holder; `bench workspace
-   status KEY` shows the holder.
-2. As root: `bench workspace renew_admin --state STATE --data DATA KEY`, with benchd's own state
-   and data roots. It prints a renewed token for the same holder (`grant_token`). Keep it out of
-   logs.
-3. As root: `bench workspace run --holder HOLDER --request-id FRESH_ID KEY -- COMMAND`, with the
-   renewed token in `BENCH_LEASE_TOKEN`. The command commits or removes the stray files, for
+1. `bench workspace stop_admin --socket SOCKET KEY`. The lease stays with the attempt's holder;
+   `bench workspace status --socket SOCKET KEY` shows the holder.
+2. `bench workspace renew_admin --state STATE --data DATA --cgroup-root CGROUP_ROOT --mirror-timeout
+   TIMEOUT KEY`. It is a local verb, with no `--socket`. It prints a renewed token for the same
+   holder (`grant_token`). Keep it out of logs.
+3. `bench workspace run --socket SOCKET --holder HOLDER --request-id FRESH_ID KEY -- COMMAND`, with
+   the renewed token in `BENCH_LEASE_TOKEN`. The command commits or removes the stray files, for
    example `rm -f sandbox/notes.txt`. A successful run checkpoints and releases.
-4. `bench workspace status KEY`. Only if it still shows the lease, run `bench workspace
-   checkpoint` and then `bench workspace release` with the same token.
-5. Optionally, `bench workspace reclaim KEY`. The hub reclaims the bench itself once the card is
-   done, cancelled or dormant.
+4. `bench workspace status --socket SOCKET KEY`. Only if it still shows the lease, run `bench
+   workspace checkpoint --socket SOCKET KEY` and then `bench workspace release --socket SOCKET KEY`
+   with the same token.
+5. Optionally, `bench workspace reclaim --socket SOCKET KEY`. The hub reclaims the bench itself once
+   the card is done, cancelled or dormant.
 
 **Not built yet:** a SuperBench release that discards the tree back to its last checkpoint. Until
 it exists, a dirty bench always needs the steps above.

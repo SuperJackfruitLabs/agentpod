@@ -670,7 +670,8 @@ would not otherwise hear of it.
 - **A held bench:**
   - The attempt parks `remote.held_dirty` (`remote.lease_held` for another held refusal) and keeps
     its station busy. `failure_pending` is a holding phase for a remote profile.
-  - The hub says `checkpoint.parked` (`lease_held`) once, with the operator's steps, and warns.
+  - The hub says `checkpoint.parked` (`lease_held`) once per hub process (the dedupe is in memory,
+    so a restart can say it again), with the operator's steps, and warns.
   - It is never timed out. `run_ended.unconfirmed` applies only to a node that does not answer.
   - Once the node's status is terminal, the failure closes `failed` (or the attempt retires
     `run_ended`) and the station is free.

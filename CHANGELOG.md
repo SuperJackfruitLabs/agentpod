@@ -79,8 +79,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   bench: the bench host's node checkpoints a clean tree before it releases the
   lease, so the agent's commits are kept (the card still reports the failure).
   A dirty tree is never discarded. The attempt waits `remote.held_dirty`,
-  keeps its station busy, says once on the card that the bench needs an
-  operator (stop_admin, renew_admin, run, release), and ends as usual once an
+  keeps its station busy, says on the card (once per hub process) that the
+  bench needs an operator (stop_admin, renew_admin, run, release), and ends as usual once an
   operator has released the lease. A SuperBench release that discards a dirty
   tree is not built yet. New page: "Remote bench stages".
 
