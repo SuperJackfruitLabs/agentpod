@@ -16,6 +16,7 @@
  *   board and waited on within the agent's permission limit; no answer ends the turn `unanswered`.
  */
 import { CARD_PROMPT_VERSION, CardPrompt, CardPromptComment, renderCardPrompt, type AcpEvent } from "@agentpod/contract";
+import { z } from "zod";
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { boardTools, claimedSessionInput } from "./dispatch-prompt";
@@ -33,7 +34,26 @@ export const REMOTE_TURN_PREFACE = "You are working in this card's workspace on 
   "End your turn when this stage's work is done.";
 
 /** The board calls a remote turn makes: the run's context (its card and questions), the run check, and a question. */
-export type RemoteTurnClient = Pick<SuperpipelineClient, "context" | "heartbeat" | "activity">;
+export type RemoteTurnClient = Pick<SuperpipelineClient, "context" | "heartbeat" | "activity" | "runRecord">;
+
+/**
+ * The board's open and answered questions for exactly this run (GET runs/:id, read unvalidated). While a
+ * question is open the board shows the run waiting on it, not `working`, so the checkpoint context check
+ * refuses it; the questions are read here only for a view of this run and lease, still its card's run.
+ */
+const questionView = z.object({
+  run: z.object({ runId: z.string(), leaseEpoch: z.number() }).passthrough(),
+  card: z.object({ currentRunId: z.string().nullable() }).passthrough(),
+  elicitations: z.array(z.object({ id: z.string(), status: z.enum(["pending", "answered", "cancelled"]),
+    answer: z.object({ option: z.string().nullable().optional(), text: z.string().nullable().optional(), answeredBy: z.string(),
+      answeredByPrincipal: z.string().nullable().optional(), answeredAt: z.string() }).nullable() }).passthrough()).optional(),
+}).passthrough();
+function runQuestions(raw: unknown, attempt: RetainedCheckpointAttempt): Array<Pick<RunElicitation, "id" | "status" | "answer">> {
+  const view = questionView.safeParse(raw);
+  if (!view.success || view.data.run.runId !== attempt.claim.runId || view.data.run.leaseEpoch !== attempt.claim.leaseEpoch ||
+    view.data.card.currentRunId !== attempt.claim.runId) return [];
+  return view.data.elicitations ?? [];
+}
 
 /** What a remote turn needs of the loop that runs its station: the ACP port and the roster row. */
 export interface RemoteTurnDeps {
@@ -189,7 +209,7 @@ export async function startRemoteTurn(deps: RemoteTurnDeps & { client: RemoteTur
     let questionId: string | undefined;
     for (;;) {
       if (segment.settled) return;
-      const elicitations: RunElicitation[] = (await client.context(attempt.claim.runId, attempt.claim)).elicitations ?? [];
+      const elicitations = runQuestions(await client.runRecord(attempt.claim.runId), attempt);
       const question = questionId ? elicitations.find((e) => e.id === questionId) : elicitations.filter((e) => !asked.has(e.id)).at(-1);
       if (!question || question.status === "cancelled") return unanswered(question ? "cancelled" : "unrecorded");
       questionId = question.id;

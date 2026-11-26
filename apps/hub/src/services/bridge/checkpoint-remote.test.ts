@@ -602,7 +602,7 @@ test("the remote turn opens in the workspace root with the board tools, says the
     promptSession: async (_user, _session, text) => { prompts.push(text); },
     subscribe: (_id, fn) => { listener = fn; return () => { listener = undefined; }; },
     endSession: async () => {}, answerPermission: async () => {} };
-  const client: RemoteTurnClient = { context: async () => structuredClone(claimFixture.context), heartbeat: async () => ({}), activity: async () => ({}) };
+  const client: RemoteTurnClient = { context: async () => structuredClone(claimFixture.context), runRecord: async () => ({}), heartbeat: async () => ({}), activity: async () => ({}) };
   const agent = { key: "fixture", boardId: "brd_ABC123", token: "spa_x", stationId: attempt.profile.target.station_id,
     hubUserId: "usr_x", mode: "full-auto" as const, mcpToken: "spm_fixture" };
   const turn = await startRemoteTurn({ acp, agent, tenantId: attempt.row.tenantId, mcpUrl: "https://pipeline.test/mcp", client },
@@ -660,7 +660,7 @@ test("a station a remote stage holds claims no checkpoint work either, and the o
 });
 
 /** A remote turn over a fake ACP port and board: the test speaks for the agent, and for whoever answers on the board. */
-async function turnRig(agentOver: Partial<RemoteTurnDeps["agent"]> = {}) {
+async function turnRig(agentOver: Partial<RemoteTurnDeps["agent"]> = {}, leaseDrift = 0) {
   const { attempt } = await remoteAttempt("working");
   const prompts: string[] = [];
   const answers: Array<{ seq: number; optionId: string }> = [];
@@ -677,7 +677,14 @@ async function turnRig(agentOver: Partial<RemoteTurnDeps["agent"]> = {}) {
     subscribe: (_id, fn) => { listener = fn; return () => { listener = undefined; }; },
     endSession: async () => {}, answerPermission: async (_user, _session, requestSeq, optionId) => { answers.push({ seq: requestSeq, optionId }); } };
   const client: RemoteTurnClient = {
-    context: async () => ({ ...structuredClone(claimFixture.context), elicitations: structuredClone(elicitations) }),
+    // As the board does: while a question is open its run is waiting, not working, and the checkpoint context check refuses it.
+    context: async () => {
+      if (elicitations.some((e) => e.status === "pending")) throw new Error("Checkpoint claim refused: context");
+      return { ...structuredClone(claimFixture.context), elicitations: structuredClone(elicitations) };
+    },
+    runRecord: async () => ({ ...structuredClone(claimFixture.context), run: { ...claimFixture.context.run, runId: attempt.claim.runId,
+      leaseEpoch: attempt.claim.leaseEpoch + leaseDrift, status: elicitations.some((e) => e.status === "pending") ? "input-required" : "working" },
+    card: { ...claimFixture.context.card, currentRunId: attempt.claim.runId }, elicitations: structuredClone(elicitations) }),
     heartbeat: async () => ({}),
     activity: async (_lease, activity) => {
       posted.push(asRecord(activity));
@@ -740,6 +747,35 @@ test("a permission request the roster's mode leaves open is asked on the board a
   expect(await rig.ended()).toBeUndefined();
 });
 
+test("a question the board shows the run waiting on is read from the run view, and its later answer delivered", async () => {
+  const rig = await turnRig({ permissionWaitMs: 60_000 });
+  const options = [{ optionId: "allow_once", name: "Yes", kind: "allow_once" }, { optionId: "reject_once", name: "No", kind: "reject_once" }];
+  const seq = rig.emit("permission-request", { toolCall: { title: "Edit docs/question-check.md", kind: "edit" }, options });
+  for (let i = 0; i < 20 && rig.elicitations.length === 0; i++) await tick();
+  // Several polls while it is open: the run is waiting on it, and the checkpoint context check would refuse.
+  await new Promise((resolve) => { setTimeout(resolve, 25); });
+  expect(await rig.ended()).toBeUndefined();
+  const question = rig.elicitations[0];
+  if (!question) throw new Error("no question asked");
+  question.status = "answered"; question.answer = { option: "allow_once", answeredBy: "usr_board", answeredAt: new Date().toISOString() };
+  for (let i = 0; i < 50 && rig.answers.length === 0; i++) await new Promise((resolve) => { setTimeout(resolve, 2); });
+  expect(rig.answers).toEqual([{ seq, optionId: "allow_once" }]);
+  expect(await rig.ended()).toBeUndefined();
+});
+
+test("an answer on a run view of another lease is never delivered", async () => {
+  const rig = await turnRig({ permissionWaitMs: 60_000 }, 1);
+  rig.emit("permission-request", { toolCall: { title: "Edit docs/x.md", kind: "edit" },
+    options: [{ optionId: "allow_once", name: "Yes", kind: "allow_once" }] });
+  for (let i = 0; i < 20 && rig.elicitations.length === 0; i++) await tick();
+  const question = rig.elicitations[0];
+  if (!question) throw new Error("no question asked");
+  question.status = "answered"; question.answer = { option: "allow_once", answeredBy: "usr_board", answeredAt: new Date().toISOString() };
+  for (let i = 0; i < 50 && !(await rig.ended()); i++) await new Promise((resolve) => { setTimeout(resolve, 2); });
+  expect((await rig.ended())?.stopReason).toBe("unanswered");
+  expect(rig.answers).toEqual([]);
+});
+
 test("a question nobody answers in time ends the remote turn unanswered", async () => {
   const rig = await turnRig({ permissionWaitMs: 5 });
   rig.emit("permission-request", { toolCall: { title: "Run `rm -rf build`", kind: "execute" },
@@ -755,7 +791,7 @@ test("a remote turn whose card cannot be read ends the session it opened", async
   const ended: string[] = [];
   const acp: AcpPort = { ...idleAcp, createSession: async () => ({ id: "acps_lost", libraryTools: false }),
     endSession: async (_user, session) => { ended.push(session); } };
-  const client: RemoteTurnClient = { context: async () => { throw new Error("board unreachable"); }, heartbeat: async () => ({}),
+  const client: RemoteTurnClient = { context: async () => { throw new Error("board unreachable"); }, runRecord: async () => ({}), heartbeat: async () => ({}),
     activity: async () => ({}) };
   const agent = { key: "fixture", boardId: "brd_ABC123", token: "spa_x", stationId: attempt.profile.target.station_id,
     hubUserId: "usr_x", mode: "full-auto" as const };
