@@ -25,6 +25,7 @@ import { DEFAULT_OWN_WORK_QUIET_MS, DEFAULT_OWN_WORK_TIMEOUT_MS, DEFAULT_PERMISS
 import { boardPermissionSubject, isAutoAnswered, selectedOptionId, withoutApprovals } from "./permission";
 import { isEnvelopeRefusal, type RunElicitation, type SuperpipelineClient } from "./superpipeline";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
+import { noteCheckpoint } from "./checkpoint-log";
 
 /** Said before the card, word for word. */
 export const REMOTE_TURN_PREFACE = "You are working in this card's workspace on a remote bench, through your terminal and file tools; " +
@@ -166,13 +167,18 @@ export async function startRemoteTurn(deps: RemoteTurnDeps & { client: RemoteTur
     }
     armQuiet();
   };
+  /** A question that ends the turn `unanswered` says why in the checkpoint log (never its text). */
+  const unanswered = (why: string, error?: unknown) => {
+    noteCheckpoint("remote", `remote.question.${why}`, { attemptId: attempt.row.attemptId, runId: attempt.claim.runId }, error ?? new Error(why));
+    settle("unanswered");
+  };
   /** Ask on the board, as ordinary dispatch does, and deliver the answer; anything else ends the turn `unanswered`. */
   const ask = async (event: AcpEvent) => {
     for (const activity of coalescer.push(event)) {
       try { await client.activity(attempt.claim, activity); }
       catch (error) {
         const declineOnly = withoutApprovals(activity);
-        if (!declineOnly || !isEnvelopeRefusal(error)) return settle("unanswered");
+        if (!declineOnly || !isEnvelopeRefusal(error)) return unanswered("post", error);
         await client.activity(attempt.claim, declineOnly);
       }
     }
@@ -185,18 +191,18 @@ export async function startRemoteTurn(deps: RemoteTurnDeps & { client: RemoteTur
       if (segment.settled) return;
       const elicitations: RunElicitation[] = (await client.context(attempt.claim.runId, attempt.claim)).elicitations ?? [];
       const question = questionId ? elicitations.find((e) => e.id === questionId) : elicitations.filter((e) => !asked.has(e.id)).at(-1);
-      if (!question || question.status === "cancelled") return settle("unanswered");
+      if (!question || question.status === "cancelled") return unanswered(question ? "cancelled" : "unrecorded");
       questionId = question.id;
       asked.add(question.id);
       if (question.status === "answered") {
         const optionId = selectedOptionId(offered, question.answer);
-        if (optionId === null) return settle("unanswered");
+        if (optionId === null) return unanswered("unmappable");
         const by = question.answer?.answeredBy;
         await acp.answerPermission(agent.hubUserId, session.id, event.seq, optionId,
           ...(by ? [{ via: "board" as const, principalId: question.answer?.answeredByPrincipal ?? null, userId: by }] : []));
         return;
       }
-      if (Date.now() >= deadline) return settle("unanswered");
+      if (Date.now() >= deadline) return unanswered("deadline");
       await sleep(deps.permissionPollMs ?? DEFAULT_PERMISSION_POLL_MS);
     }
   };
@@ -208,7 +214,7 @@ export async function startRemoteTurn(deps: RemoteTurnDeps & { client: RemoteTur
       return;
     }
     if (event.type === "permission-request" && !isAutoAnswered(payload)) {
-      void ask(event).catch(() => settle("unanswered")); // silent-catch-ok: a question the board could not take ends the turn `unanswered`; the phase says so
+      void ask(event).catch((error: unknown) => unanswered("error", error));
       return;
     }
     if (event.type === "error") { sawError = true; return; }
