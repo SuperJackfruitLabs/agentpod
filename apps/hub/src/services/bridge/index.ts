@@ -42,7 +42,7 @@ export {
 export { BridgeRosterRefusal } from "./credential-audience";
 export { CHECKPOINT_TERMINAL_PHASES, NO_PRODUCER_EFFECT_PHASES, readCheckpointAttempt, retireCheckpointAttempt, unresolvedCheckpointAttempts } from "./checkpoint-ledger";
 export { canonicalCheckpoint } from "./checkpoint-json";
-export { endRemoteWork } from "./checkpoint-remote";
+export { endRemoteWork, stationBenchBusy } from "./checkpoint-remote";
 export { checkpointProfileSuperseded } from "./checkpoint-profiles";
 export { probeSalaamWork, settleNeverDispatchedSalaamWork } from "./salaam-dispatch";
 export { traceDeliveryEvidence } from "./salaam-trace";

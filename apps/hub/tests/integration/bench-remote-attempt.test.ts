@@ -42,7 +42,7 @@ import { parseRemoteState } from "../../src/services/bridge/checkpoint-remote-st
 import { REMOTE_TURN_PREFACE } from "../../src/services/bridge/checkpoint-remote-turn";
 import { runOnce } from "../../src/services/bridge/dispatch";
 import { STATION_HELD_MESSAGE, type AcpPort } from "../../src/services/bridge/dispatch-types";
-import { withStationOpenLock } from "../../src/services/acp";
+import { STATION_IN_BENCH_MESSAGE, isStationInBench, setStationHold, withStationOpenLock } from "../../src/services/acp";
 import { admitAndOpen } from "../../src/services/acp/open";
 import { SuperpipelineClient } from "../../src/services/bridge/superpipeline";
 import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
@@ -314,7 +314,8 @@ test("remote attempt attaches, runs the turn in the workspace root and settles w
     { phase: "attach", probe: "other-binding", decision: "refused", code: "stale_owner" }]);
   // One session, opened after the attach, in the bench's workspace root, with the board tools.
   expect(seen.sessions).toHaveLength(1);
-  expect(seen.sessions[0]).toMatchObject({ stationId, tenantId, cwd: CREDENTIAL.working_directory, mcpProxy: true,
+  // The stage's own turn, so the hold its attempt has on the station does not refuse it.
+  expect(seen.sessions[0]).toMatchObject({ stationId, tenantId, cwd: CREDENTIAL.working_directory, mcpProxy: true, benchTurn: true,
     executionRun: { source: "superpipeline", id: attempt.claim.runId, epoch: attempt.claim.leaseEpoch } });
   expect(seen.prompts[0]).toStartWith(REMOTE_TURN_PREFACE);
 
@@ -514,15 +515,40 @@ test("the hub's session open checks the bridge's admission under the station's o
   const order: string[] = [];
   let release!: () => void;
   const held = withStationOpenLock(stationId, () => new Promise<void>((resolve) => { order.push("lock held"); release = resolve; }));
-  const refused = admitAndOpen({ stationId, admit: async () => { order.push("admit"); throw new Error(STATION_HELD_MESSAGE); } },
+  const refused = admitAndOpen({ stationId, tenantId, admit: async () => { order.push("admit"); throw new Error(STATION_HELD_MESSAGE); } },
     async () => { order.push("opened"); });
   await Promise.resolve(); await Promise.resolve();
   order.push("lock released");
   release();
   await held;
   await expect(refused).rejects.toThrow(STATION_HELD_MESSAGE);
-  await admitAndOpen({ stationId, admit: async () => { order.push("admit"); } }, async () => { order.push("opened"); });
+  await admitAndOpen({ stationId, tenantId, admit: async () => { order.push("admit"); } }, async () => { order.push("opened"); });
   expect(order).toEqual(["lock held", "lock released", "admit", "admit", "opened"]);
+});
+
+test("no other session opens on a station a remote stage holds: Console, Matrix and editor opens alike; the stage's own turn does", async () => {
+  // The hub's open asks the bridge's hold under the station's open lock, as index.ts installs it.
+  setStationHold(stationBenchBusy);
+  try {
+    // The rows of the test above: "u" settled with its detach unconfirmed (held), "d" detached (free).
+    const held = stationNamed("u"), free = stationNamed("d");
+    const opened: string[] = [];
+    const open = (station: string, extra: { benchTurn?: true } = {}) =>
+      admitAndOpen({ stationId: station, tenantId, ...extra }, async () => { opened.push(station); });
+    // Held: refused with the sentence Console and Matrix show, and nothing opens.
+    const refusal = await open(held).catch((error: unknown) => error);
+    expect(isStationInBench(refusal)).toBe(true);
+    expect(refusal instanceof Error && refusal.message).toBe(STATION_IN_BENCH_MESSAGE);
+    expect(opened).toEqual([]);
+    // The stage's own turn opens on its held station; a free station opens as before.
+    await open(held, { benchTurn: true });
+    await open(free);
+    expect(opened).toEqual([held, free]);
+    // A hold that cannot be read refuses too.
+    setStationHold(async () => { throw new Error("database unavailable"); });
+    await expect(open(free)).rejects.toThrow("database unavailable");
+    expect(opened).toHaveLength(2);
+  } finally { setStationHold(undefined); }
 });
 
 test("a reclaimed run makes the bench node release and the agent's node detach", async () => {

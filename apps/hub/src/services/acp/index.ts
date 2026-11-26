@@ -5,6 +5,7 @@
 export { buildAcpAgent } from "./agent";
 export {
   SESSION_BUSY_MESSAGE,
+  STATION_IN_BENCH_MESSAGE,
   answerPermission,
   cancelPermission,
   cancelTurn,
@@ -16,6 +17,7 @@ export {
   getSession,
   isSalaamStationBusy,
   isSessionNotResumable,
+  isStationInBench,
   listSessions,
   promptSession,
   readEvents,
@@ -26,6 +28,7 @@ export {
   sessionHasLibraryTools,
   sessionIsBusy,
   setMode,
+  setStationHold,
   stationReadiness,
   subscribe,
   whenIdle,

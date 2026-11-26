@@ -86,6 +86,11 @@ export interface CreateSessionInput {
    * throw refuses the open. The bridge re-checks there that no remote bench stage holds the station.
    */
   admit?: () => Promise<void>;
+  /**
+   * Trusted bridge field: set only by a remote bench stage's own turn. Every other open is refused
+   * while a remote bench stage holds the station (`refuseWhileInBench`); this one is the stage's work.
+   */
+  benchTurn?: true;
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
   executionRun?: SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;

@@ -89,6 +89,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 - While a station is attached to a remote bench, resuming its turn after a hub
   restart, or retiring its attempt, closes every session on that station,
   including a workspace admin's Console chat.
+- While a remote bench stage holds a station (from its claim until its detach
+  is confirmed), the hub opens no other session on it: a Console chat is
+  refused 409 `station_in_bench`, a Matrix room is told "This station is working
+  in a card's bench; try again when the stage finishes.", and an editor's ACP
+  proxy open is refused the same way. Only the stage's own turn opens. Sessions
+  that Hermes's own messaging platforms open are outside the hub and share the
+  bench; turn those platforms off on a station that serves remote stages.
 
 ### Fixed
 

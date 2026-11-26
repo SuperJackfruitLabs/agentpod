@@ -57,10 +57,15 @@ export { closeStationSessions, endSession, endSessionAsWorkspaceAdmin } from "./
 export { _subscriberCountForTest, subscribe } from "./events";
 export {
   STATION_BUSY_REASON,
+  STATION_IN_BENCH_MESSAGE,
   SalaamStationBusy,
+  StationInBench,
   interactiveWorkspaceAdmin,
   isSalaamStationBusy,
+  isStationInBench,
+  setStationHold,
   stationReadiness,
+  type StationHold,
   type StationReadiness,
 } from "./gates";
 export { sessionHasLibraryTools } from "./handshake";

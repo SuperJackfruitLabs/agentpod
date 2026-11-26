@@ -108,7 +108,8 @@ export async function startRemoteTurn(deps: RemoteTurnDeps & { client: RemoteTur
   cwd: string, opening = REMOTE_TURN_PREFACE): Promise<RemoteTurn> {
   const { acp, agent, client } = deps;
   const run = { source: "superpipeline" as const, id: attempt.claim.runId, epoch: attempt.claim.leaseEpoch };
-  const session = await acp.createSession({ ...claimedSessionInput(deps, attempt.claim, () => client.heartbeat(attempt.claim)), cwd });
+  const session = await acp.createSession({ ...claimedSessionInput(deps, attempt.claim, () => client.heartbeat(attempt.claim)), cwd,
+    benchTurn: true });
   let text: string;
   try { text = `${opening}\n\n${await cardText(client, attempt, boardTools(deps) !== null, session.libraryTools === true)}`; }
   catch (error) {

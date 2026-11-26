@@ -53,6 +53,8 @@ export interface AcpPort {
     cwd?: string;
     /** Checked under the station's session-open lock just before the open; a throw refuses it. */
     admit?: () => Promise<void>;
+    /** Only a remote bench stage's own turn: the open is not refused for the hold that stage itself has. */
+    benchTurn?: true;
     executionRun?: SalaamRunAuthority;
     validateExecutionRun?: () => Promise<unknown>;
   }): Promise<{ id: string; libraryTools?: boolean }>;

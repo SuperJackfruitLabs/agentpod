@@ -98,6 +98,10 @@ export function createSessionFailure(err: unknown): {
     return { status: 424, body: { error: err.message, code: "station_busy", holder: err.holder } };
   if (acp.isSessionNotResumable(err))
     return { status: 409, body: { error: err.message, code: "not_resumable" } };
+  // A remote bench stage holds the station: its terminal may point at a card's bench, so a chat now
+  // would work in that bench. Not a node failure; it clears when the stage finishes.
+  if (acp.isStationInBench(err))
+    return { status: 409, body: { error: err.message, code: "station_in_bench" } };
   // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
   if (isOrgPlaneUnavailable(err)) return { status: 503, body: ORG_PLANE_UNAVAILABLE_BODY };
   // A refusal by the control pair is 403. A node-failure status would invite a retry that can

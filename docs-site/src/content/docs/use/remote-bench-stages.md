@@ -89,6 +89,25 @@ the answer.
 While a station is attached to a bench, resuming its turn after a hub restart, or retiring its
 attempt, closes **every** session on that station. That includes a workspace admin's Console chat.
 
+### Other sessions on the station
+
+Hermes reads a profile's terminal when a session opens. A session opened while the station is
+attached would therefore work in the card's bench, beside the stage's own agent. So, from the
+card's claim until the station is detached, the hub opens no other session on the station:
+
+- A Console chat is refused with "This station is working in a card's bench; try again when the
+  stage finishes."
+- A Matrix room's message gets the same sentence as a notice, and no session opens. The room's
+  next message after the stage opens a session as usual.
+- An editor connected through the ACP proxy gets the same refusal.
+- Board work for another card waits, as it does for any busy station.
+
+**The hub cannot refuse sessions it does not open.** Hermes's own messaging platforms (its
+gateway's Telegram, Discord, Slack and similar adapters) open their own sessions for the profile.
+While the station is attached, those sessions work in the card's bench too, and their edits are
+checkpointed with the card. Turn the gateway's messaging platforms off for a profile whose station
+serves a remote stage.
+
 ## When an attempt fails or its run ends
 
 Whatever ends the attempt (the agent's node refuses the attach, the dirty-tree limit, a lost or

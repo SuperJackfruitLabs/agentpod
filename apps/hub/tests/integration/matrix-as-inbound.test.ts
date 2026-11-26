@@ -6,7 +6,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals, linkMatrixId, clearGrant } from "../helpers/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
-import { SESSION_BUSY_MESSAGE } from "../../src/services/acp/sessions";
+import { SESSION_BUSY_MESSAGE, STATION_IN_BENCH_MESSAGE, StationInBench } from "../../src/services/acp/sessions";
 import { pollUntil } from "../helpers/wait";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/auth/org-plane/directory";
@@ -325,6 +325,16 @@ describe("an inbound room message", () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]!.body).toMatch(/offline|could not/i);
+  });
+
+  test("says the station is working in a card's bench, not that it could not be reached, while a remote stage holds it", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    createFails = new StationInBench();
+
+    await handleRoomMessage(message(OWNER_MXID, "hi"), deps());
+
+    expect(sent).toEqual([{ roomId: ROOM, body: STATION_IN_BENCH_MESSAGE }]);
+    expect(prompts).toHaveLength(0);
   });
 
   test("ignores a message in a room that maps to no station", async () => {

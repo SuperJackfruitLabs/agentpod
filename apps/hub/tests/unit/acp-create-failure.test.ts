@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { createSessionFailure } from "../../src/routes/station-acp";
 import { SalaamAuthorityDenied } from "../../src/services/salaam/authority";
 import { ControlPairDenied } from "../../src/services/control/control-pair";
+import { StationInBench } from "../../src/services/acp/gates";
 
 // Spec 2026-10-23 C10/C16: the console measured a 502 for "no dispatch grant", which an edge then
 // replaced with HTML. A refusal is 403; a node failure is 424/503; nothing is 502.
@@ -36,4 +37,11 @@ test("the known caller errors keep their statuses", () => {
   expect(createSessionFailure(new Error("Station not found.")).status).toBe(404);
   expect(createSessionFailure(new Error("This station does not support agent sessions.")).status).toBe(403);
   expect(createSessionFailure(new Error("An active session already exists for this agent.")).status).toBe(409);
+});
+
+test("a station a remote bench stage holds is 409 station_in_bench with the sentence the console shows", () => {
+  expect(createSessionFailure(new StationInBench())).toEqual({
+    status: 409,
+    body: { error: "This station is working in a card's bench; try again when the stage finishes.", code: "station_in_bench" },
+  });
 });
