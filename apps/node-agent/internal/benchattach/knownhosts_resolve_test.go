@@ -30,6 +30,20 @@ func TestKnownHostsFromConfig(t *testing.T) {
 		{"an unexpanded home", "userknownhostsfile ~/.ssh/known_hosts\n", ""},
 		{"no file at all", "user b-x\nport 2222\n", ""},
 		{"a host key alias", "hostkeyalias bench\nuserknownhostsfile /home/agent/.ssh/known_hosts\n", ""},
+		// ssh -G prints each path after one space and quotes none (OpenSSH 9.9 prints
+		// `UserKnownHostsFile="/tmp/a b/known_hosts" /tmp/c` as `userknownhostsfile /tmp/a b/known_hosts /tmp/c`):
+		// a path with a space cannot be read one way only, and its first word is a file ssh never reads.
+		{"a path with a space", "userknownhostsfile /home/agent/my files/known_hosts /home/agent/.ssh/known_hosts2\n", ""},
+		{"a path with a space, alone", "userknownhostsfile /home/agent/my files/known_hosts\n", ""},
+		{"a double-quoted path", "userknownhostsfile \"/home/agent/my files/known_hosts\"\n", ""},
+		{"a single-quoted path", "userknownhostsfile '/home/agent/.ssh/known_hosts'\n", ""},
+		{"a quote inside a path", "userknownhostsfile /home/agent/.ssh/known\"hosts\n", ""},
+		{"a tab between paths", "userknownhostsfile /home/agent/.ssh/known_hosts\t/srv/hosts\n", ""},
+		{"two spaces between paths", "userknownhostsfile /home/agent/.ssh/known_hosts  /srv/hosts\n", ""},
+		{"a later path that is not absolute", "userknownhostsfile /home/agent/.ssh/known_hosts relative\n", ""},
+		{"none among others", "userknownhostsfile none /srv/hosts\n", ""},
+		{"a carriage return is not a path", "userknownhostsfile /srv/hosts\r\n", "/srv/hosts"},
+		{"a single clean path", "userknownhostsfile /home/agent/.ssh/known_hosts\n", "/home/agent/.ssh/known_hosts"},
 	} {
 		got, err := knownHostsFromConfig([]byte(tc.out))
 		if tc.want == "" {

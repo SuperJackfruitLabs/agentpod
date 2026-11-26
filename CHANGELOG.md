@@ -127,6 +127,11 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   open the board shows the run waiting, which the checkpoint context check
   refused; the turn now reads its run's questions from the run view. Why a
   question ended the turn unanswered is logged.
+- `bench.remote.attach` refuses (`unavailable`, nothing written) when the
+  `known_hosts` path `ssh -G` names contains a space or a quote. `ssh -G`
+  prints such a path unquoted, as several words, and attach pinned the first
+  word: a file ssh never reads, so Hermes's `accept-new` trusted the first host
+  key that answered. Every path on the line must now be a clean absolute path.
 
 ## v0.1.133 — 2026-11-24
 

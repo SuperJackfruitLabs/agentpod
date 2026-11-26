@@ -42,6 +42,12 @@ func SSHKnownHosts(ctx context.Context, user, host string, port int) (string, er
 // knownHostsFromConfig reads `ssh -G` output: the first UserKnownHostsFile, refused when it is not a
 // clean absolute path, when it is `none` or the null device, and when ssh would look the bench's key
 // up under a HostKeyAlias (the pin names the address).
+//
+// `ssh -G` prints the UserKnownHostsFile list on one line, each path after a single space and none
+// quoted, so a path that contains a space cannot be told from two paths. Every value on the line is
+// refused unless it reads one way only: a path with a quote or any whitespace other than the single
+// separating spaces, and any value that is not a clean absolute path, refuse the attach. A pin in a
+// truncated path would be a file ssh never reads, and Hermes's accept-new would trust the first key.
 func knownHostsFromConfig(out []byte) (string, error) {
 	var files []string
 	for _, line := range strings.Split(string(out), "\n") {
@@ -53,17 +59,38 @@ func knownHostsFromConfig(out []byte) (string, error) {
 		case "hostkeyalias":
 			return "", errors.New("benchattach: ssh looks the bench up under a HostKeyAlias, so a pin for its address would not be read")
 		case "userknownhostsfile":
-			files = fields[1:]
+			var err error
+			if files, err = knownHostsFiles(line); err != nil {
+				return "", err
+			}
 		}
 	}
 	if len(files) == 0 {
 		return "", errors.New("benchattach: ssh names no UserKnownHostsFile for the bench")
 	}
 	f := files[0]
-	if !filepath.IsAbs(f) || filepath.Clean(f) != f || f == os.DevNull {
+	if f == os.DevNull {
 		return "", fmt.Errorf("benchattach: ssh reads the bench's host key from %q, where no pin can be kept", f)
 	}
 	return f, nil
+}
+
+// knownHostsFiles splits one `userknownhostsfile` line of `ssh -G` into its paths, or refuses it
+// when the split is not the only reading: see knownHostsFromConfig.
+func knownHostsFiles(line string) ([]string, error) {
+	values := strings.Split(strings.TrimSuffix(line, "\r"), " ")[1:]
+	if len(values) == 1 && values[0] == "none" {
+		return nil, errors.New(`benchattach: ssh reads the bench's host key from "none", where no pin can be kept`)
+	}
+	for _, v := range values {
+		if v == "" || strings.ContainsAny(v, "\"'\t\r\v\f") {
+			return nil, fmt.Errorf("benchattach: ssh names its known_hosts files as %q, which cannot be read one way only (a path with a space or a quote); name a known_hosts path without them", line)
+		}
+		if !filepath.IsAbs(v) || filepath.Clean(v) != v {
+			return nil, fmt.Errorf("benchattach: ssh names a known_hosts file %q that is not a clean absolute path (or a path with a space, split by ssh -G), where no pin can be kept", v)
+		}
+	}
+	return values, nil
 }
 
 // knownHostsTarget checks the resolved file before anything is written: it must be absent (attach
