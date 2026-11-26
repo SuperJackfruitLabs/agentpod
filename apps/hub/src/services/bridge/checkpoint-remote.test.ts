@@ -1166,7 +1166,9 @@ test("a hub restart opens no session until the station's sessions are confirmed 
   // A port that cannot confirm closes at all opens nothing either.
   const acp = h.deps.remote?.turn.acp;
   if (!acp) throw new Error("no acp seam");
-  const { closeStationSessions: confirm, ...without } = acp;
+  const confirm = acp.closeStationSessions?.bind(acp);
+  const without: typeof acp = { ...acp };
+  delete without.closeStationSessions;
   if (h.deps.remote) h.deps.remote.turn.acp = without;
   h.state.closeConfirmed = true;
   await h.drive();
