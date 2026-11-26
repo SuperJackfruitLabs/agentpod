@@ -10,6 +10,13 @@ Source: [`internal/benchlaunch`](../apps/node-agent/internal/benchlaunch),
 [`benchworkspace/registration_observe.go`](../apps/node-agent/internal/benchworkspace/registration_observe.go),
 [`benchbridge/handler.go`](../apps/node-agent/internal/benchbridge/handler.go).
 
+A remote stage (`fleet bench stage set --execution remote`) uses launch `remote-v1` instead: the
+same prepare, lease and baseline checkpoint, then `attach` and `finish` in place of a run. See
+`docs/contributor/bench-coordinator-wire.md`, "Remote launch", and
+`docs/contributor/bench-checkpoint-reporting.md`, "Remote stages". A retired `remote-v1` record
+checkpoints a clean tree before it releases its lease, and holds a dirty one for the operator path
+below.
+
 ## Why
 
 The older grouped launch writes the worker's task into a Node-private context

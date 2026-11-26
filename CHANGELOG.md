@@ -75,6 +75,42 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   only form ACP edit approval can preview remotely), blocks `replace_all` with
   a hint toward V4A, and tells each new session which bench and directory it
   works in.
+- A remote bench stage that fails, or whose run ends, after its agent changed the
+  bench: the bench host's node checkpoints a clean tree before it releases the
+  lease, so the agent's commits are kept (the card still reports the failure).
+  A dirty tree is never discarded. The attempt waits `remote.held_dirty`,
+  keeps its station busy, says once on the card that the bench needs an
+  operator (stop_admin, renew_admin, run, release), and ends as usual once an
+  operator has released the lease. A SuperBench release that discards a dirty
+  tree is not built yet. New page: "Remote bench stages".
+
+### Changed
+
+- While a station is attached to a remote bench, resuming its turn after a hub
+  restart, or retiring its attempt, closes every session on that station,
+  including a workspace admin's Console chat.
+
+### Fixed
+
+- A remote stage whose attempt failed on the station's node or in the hub
+  (an attach refused for `credential_files`, say) no longer leaves the bench
+  lease held. The bench host's node is told, and the hub's decision answers
+  `stale_owner` for a failing or failed remote attempt.
+- A remote stage's run the board ended (a card moved, a run reclaimed) no
+  longer leaves the bench leased: the hub's decision now answers the bench
+  node's status `stale_owner` once the board says the run ended.
+- `bench.reclaim` clears a settled remote stage's bench. It answered
+  `unsupported` for every remote stage, so finished cards kept their benches
+  until capacity ran out.
+- A retired remote record never checkpoints a stopped lease, which left the
+  checkpoint pending and the bench unrecoverable by `renew_admin`.
+- A failure closed `run_ended` no longer fails on the board's null fields
+  (`INVALID_CHECKPOINT`), which kept a released attempt open.
+- A remote turn in `ask` or `accept-edits` mode waits for its question's answer
+  instead of ending `unanswered` a second after asking. While a question is
+  open the board shows the run waiting, which the checkpoint context check
+  refused; the turn now reads its run's questions from the run view. Why a
+  question ended the turn unanswered is logged.
 
 ## v0.1.133 — 2026-11-24
 
