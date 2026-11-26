@@ -39,7 +39,8 @@ type fakeBenchd struct {
 	stopped   bool
 	execution string // the lease's live remote execution, "" when none
 	nextExec  int
-	dirty     bool // a checkpoint finds uncommitted files
+	dirty     bool // a checkpoint (and a release) finds uncommitted files
+	committed bool // the agent committed since the last checkpoint: a release refuses until one is taken
 	ops       []string
 	keys      []string // public keys benchd was asked to sign
 	issued    []byte   // the corpus's issued-certificate reply
@@ -231,8 +232,18 @@ func (f *fakeBenchd) serve(w http.ResponseWriter, r *http.Request) {
 			reply(w, 409, envelope(op, "", false, nil, "conflict", "workspace has uncommitted or untracked files; commit or remove them before checkpoint or release: a/notes.txt"))
 			return
 		}
+		// As benchd does, a release needs a clean tree whose HEAD is the complete checkpoint.
+		if op == "release" && f.dirty {
+			reply(w, 409, envelope(op, "", false, nil, "conflict", "workspace has uncommitted or untracked files; commit or remove them before checkpoint or release: a/notes.txt"))
+			return
+		}
+		if op == "release" && f.committed {
+			reply(w, 409, envelope(op, "", false, nil, "operation_failed", "workspace HEAD vector differs from its complete checkpoint"))
+			return
+		}
 		switch op {
 		case "checkpoint":
+			f.committed = false
 			generation, commit := strings.Repeat("2", 32), fakeCommitA
 			if f.countLocked("checkpoint") > 1 {
 				generation, commit = strings.Repeat("4", 32), fakeCommitE

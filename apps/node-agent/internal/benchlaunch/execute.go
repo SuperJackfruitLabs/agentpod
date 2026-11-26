@@ -291,6 +291,9 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	if _, err = c.granted(ctx, spec, id); err != nil {
 		return err
 	}
+	if held, err := c.saveRemote(ctx, spec, r, m.Grant.LeaseToken); held || err != nil {
+		return err
+	}
 	if err = c.stopRemote(ctx, spec, m.Grant.LeaseToken); err != nil {
 		return err
 	}

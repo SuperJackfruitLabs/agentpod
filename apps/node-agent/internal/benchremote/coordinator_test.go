@@ -376,8 +376,8 @@ func TestCancelStopsAndReleases(t *testing.T) {
 	if _, err := tr.c.Cancel(context.Background(), tr.spec); err != nil {
 		wantCode(t, err, "stale_owner")
 	}
-	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"stop", "release"}) || tr.leased {
-		t.Fatal("cancel is a stop, then a release", got)
+	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint", "stop", "release"}) || tr.leased {
+		t.Fatal("cancel is a checkpoint, a stop, then a release", got)
 	}
 	tr.superseded.Store(false)
 	_, err := tr.c.Attach(context.Background(), tr.spec, binding, key)
@@ -386,6 +386,68 @@ func TestCancelStopsAndReleases(t *testing.T) {
 	wantCode(t, err, "stale_owner") // the record's own end
 	if tr.count("credential") != 1 {
 		t.Fatal("a certificate was asked for after cancel")
+	}
+}
+
+// A failed or retired remote attempt whose agent committed work (operator ruling, 2026-11-26): the
+// clean tree is checkpointed, so the commits are kept and the release succeeds, and the record stays
+// the attempt's failure, never a completion.
+func TestCancelCheckpointsACleanTreeKeepingTheAgentsCommits(t *testing.T) {
+	tr := newTrial(t)
+	binding := tr.prepare(t)
+	tr.attach(t, binding, testKey(1))
+	tr.committed = true
+	n := len(tr.sequence(0))
+	tr.superseded.Store(true)
+	if _, err := tr.c.Cancel(context.Background(), tr.spec); err != nil {
+		wantCode(t, err, "stale_owner")
+	}
+	if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint", "stop", "release"}) || tr.leased || tr.committed {
+		t.Fatal("the agent's commits were not checkpointed before the release", got, tr.leased)
+	}
+	_, record, _ := tr.journal(t)
+	if record["phase"] != "refused" || record["completion"] != nil || record["release"] != "done" {
+		t.Fatal("a retired record that saved its work is not still the attempt's refusal", record["phase"], record["release"])
+	}
+}
+
+// A dirty tree is never discarded: the sessions are fenced (by the checkpoint), the lease stays held for an operator and is
+// reported so; once the tree is clean (or an operator released the lease) a later status finishes.
+func TestCancelHoldsADirtyTreeForAnOperator(t *testing.T) {
+	for _, operator := range []string{"cleans the tree", "releases the lease"} {
+		tr := newTrial(t)
+		binding := tr.prepare(t)
+		tr.attach(t, binding, testKey(1))
+		tr.dirty, tr.committed = true, true
+		n := len(tr.sequence(0))
+		tr.superseded.Store(true)
+		status, err := tr.c.Cancel(context.Background(), tr.spec)
+		if err != nil || !status.LeaseHeld || !strings.HasPrefix(status.Message, "workspace has uncommitted or untracked files") {
+			t.Fatal("a dirty tree is not reported held", status, err)
+		}
+		if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint"}) || !tr.leased || tr.execution != "" {
+			t.Fatal("a dirty tree was released, stopped or left unfenced", got)
+		}
+		// Asked again while still dirty: checkpointed again (never replayed), never released.
+		n = len(tr.sequence(0))
+		if status, err = tr.c.Status(context.Background(), tr.spec); err != nil || !status.LeaseHeld {
+			t.Fatal("a held dirty tree stopped saying so", status, err)
+		}
+		if got := tr.sequence(n); !reflect.DeepEqual(got, []string{"checkpoint"}) || !tr.leased {
+			t.Fatal("a still dirty tree was released", got)
+		}
+		if operator == "cleans the tree" {
+			tr.dirty = false
+		} else {
+			tr.dirty, tr.committed, tr.leased = false, false, false
+		}
+		if _, err = tr.c.Status(context.Background(), tr.spec); err != nil {
+			wantCode(t, err, "stale_owner")
+		}
+		_, record, _ := tr.journal(t)
+		if tr.leased || record["release"] != "done" || record["phase"] != "refused" {
+			t.Fatal("once the operator "+operator+", the record did not end released", record["release"], tr.leased)
+		}
 	}
 }
 

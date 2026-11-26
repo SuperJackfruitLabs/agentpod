@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinator"
@@ -83,6 +84,44 @@ func (c Coordinator) stopRemote(ctx context.Context, spec benchdispatch.SourceSp
 		return err
 	}
 	return nil
+}
+
+// DirtyMessage is how SuperBench begins its refusal to checkpoint (or release)
+// a tree with uncommitted or untracked files.
+const DirtyMessage = "workspace has uncommitted or untracked files"
+
+// saveRemote runs before a refused (retired or failed) remote record releases
+// its lease (operator ruling, 2026-11-26). A clean tree is checkpointed with
+// the record's own token, so the agent's commits are kept and the release that
+// follows can succeed; the record stays refused, so nothing is reported as a
+// pass. A dirty tree is never discarded: benchd fenced its sessions, the lease
+// stays held, and the refusal is journaled as a held release (lease "held", with
+// SuperBench's message) for an operator. held reports that case. The refusal is
+// forgotten, so a later status checkpoints again once the tree is clean, and a
+// lease an operator already released is found gone by the release below.
+func (c Coordinator) saveRemote(ctx context.Context, spec benchdispatch.SourceSpec, r record, token string) (held bool, err error) {
+	if !c.Remote || r.Phase != phaseRefused {
+		return false, nil
+	}
+	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "checkpoint", Key: spec.BenchKey, LeaseToken: token}
+	reply, err := c.ordinary(ctx, spec, "retire_checkpoint", request, true)
+	if err != nil {
+		var refusal *Refusal
+		if errors.As(err, &refusal) {
+			return false, nil // a reply that does not parse: the release decides
+		}
+		return false, err // lost: sent again
+	}
+	if reply.OK || reply.Error == nil || reply.Error.Code != "conflict" || !strings.HasPrefix(reply.Error.Message, DirtyMessage) {
+		return false, nil // saved, or refused for another reason (a lease already gone, say): the release decides
+	}
+	// benchd fenced every session before it looked; the lease is not stopped, so the checkpoint can
+	// be taken with this token once the tree is clean.
+	c.forget(ctx, spec, "retire_checkpoint")
+	message := producerMessage(reply.Error)
+	_ = c.mark(ctx, spec, func(r *record) bool { r.ReleaseRefusal = message; return true })
+	c.releaseFailed(ctx, spec)
+	return true, benchdispatch.ErrPending
 }
 
 // RemoteView is what a remote launch reads of its own record.
