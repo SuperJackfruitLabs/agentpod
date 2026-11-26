@@ -132,6 +132,10 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   prints such a path unquoted, as several words, and attach pinned the first
   word: a file ssh never reads, so Hermes's `accept-new` trusted the first host
   key that answered. Every path on the line must now be a clean absolute path.
+- An operator's settlement of a checkpoint attempt is audited as soon as the
+  retirement is recorded. The audit was written only after the remote stage's
+  agent was stopped, which waits on its node and can fail, so a settlement could
+  stand with no audit row.
 
 ## v0.1.133 — 2026-11-24
 
