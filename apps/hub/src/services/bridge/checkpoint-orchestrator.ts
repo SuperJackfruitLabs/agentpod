@@ -309,8 +309,10 @@ async function remoteRelease(attempt: RetainedCheckpointAttempt, deps: Checkpoin
 
 /**
  * End an attempt whose run the board definitively ended (checkpoint-run-ended.ts), instead of parking
- * it forever. Never reports a pass, and never tells the board anything: a run verb on a run whose card
- * moved on would act on the card where it is now.
+ * it forever. Never reports a pass, and sends no run verb: a run verb on a run whose card moved on
+ * would act on the card where it is now. Two activities are the only writes to the card after its run
+ * ended (operator rulings): `stopped_saved`, and a remote stage's held bench (`lease_held`, once per
+ * hub process, through remoteRelease).
  *
  * - `failure_pending`: the held failure closes `failed`, outcome `run_ended`, with the board's answer.
  * - Nothing running (before execute, or `completed`): the node is told, and the attempt ends `retired`
@@ -362,7 +364,8 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
     else if (pastRunEndedBound(attempt, deps)) reason = "run_ended.unconfirmed";
     else {
       const why = node.reply ? `${node.reply.state}${"code" in node.reply ? "." + node.reply.code : ""}${leaseHeld(node.reply) ? ".lease_held" : ""}` : undefined;
-      // The card is not written to (an activity would heartbeat the unbound run), so the log names the operator's path.
+      // A one-shot attempt's card is not written to (an activity would heartbeat the unbound run), so the log
+      // names the operator's path. A remote stage's held bench was said on the card by remoteRelease.
       if (leaseHeld(node.reply)) log.warn("checkpoint run ended on the board, but its bench lease is held after a refused release; operator action needed",
         { ...meta, benchKey: retainedBenchKey(attempt) });
       return parked(attempt, "uncertain", new CheckpointRefused("uncertain", why ? `run_ended.node:${why}` : "run_ended.node_unreachable"));

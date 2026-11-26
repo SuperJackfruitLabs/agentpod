@@ -450,7 +450,9 @@ function captureParks(): { last: () => string | undefined; restore: () => void }
   const restore = setParkedLogForTests(createQuietLog((_m, meta) => { reasons.push(String(meta?.reason)); }, { now: () => 0, relogMs: 0 }));
   return { last: () => reasons.at(-1), restore };
 }
-const heldActivities = (h: Harness) => h.state.board.filter((c) => c.path.endsWith("/activities") && JSON.stringify(c.body).includes("lease_held"));
+/** The card's held-bench notices: `checkpoint.parked` with code `lease_held` (not a park whose reason merely names it). */
+const heldActivities = (h: Harness) => h.state.board.filter((c) => c.path.endsWith("/activities") &&
+  JSON.stringify(c.body).includes('"code":"lease_held"'));
 
 test("a failed remote attempt tells the bench host's node while the run is still ours, and closes once its lease is released", async () => {
   const { attempt } = await remoteAttempt();
@@ -510,6 +512,50 @@ test("a failed remote attempt whose bench holds a dirty tree waits for an operat
   expect((await h.drive()).status).toBe("failed");
   expect(latestOf(h).row.phase).toBe("failed");
   expect(h.sent(BENCH_COORDINATOR_VERB, "status")).toHaveLength(3);
+  } finally { parks.restore(); }
+});
+
+test("a failed remote attempt whose bench node does not answer waits, within the bound, before its failure closes", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  refusedAttach(h);
+  // The bench host's node is unreachable for now: nothing proves its lease released.
+  h.state.statusReply = { state: "refused", code: "unavailable" };
+  const parks = captureParks();
+  try {
+    expect((await h.drive()).status).toBe("unreported");
+    expect(parks.last()).toBe("remote.release.refused");
+    expect(latestOf(h).row.phase).toBe("failure_pending");
+    expect(h.runVerbs().filter((c) => c.path.endsWith("/fail"))).toHaveLength(1);
+    // The run is over now; inside the task's timeout plus the grace period, it still waits.
+    h.state.runView = endedView(attempt);
+    h.state.now = T0 + 30 * 60_000;
+    expect((await h.drive()).status).toBe("unreported");
+    expect(latestOf(h).row.phase).toBe("failure_pending");
+    // Past the bound, a node that never answered stops holding the station: the failure closes.
+    h.state.now = T0 + 3 * 3_600_000;
+    expect((await h.drive()).status).toBe("failed");
+    expect(latestOf(h).row.phase).toBe("failed");
+    expect(heldActivities(h)).toEqual([]);
+  } finally { parks.restore(); }
+});
+
+test("a held release that is not a dirty tree waits as remote.lease_held", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  refusedAttach(h);
+  h.state.statusReply = { state: "pending", detail: { lease: "held", message: "workspace HEAD vector differs from its complete checkpoint" } };
+  const parks = captureParks();
+  try {
+    await h.drive();
+    expect(parks.last()).toBe("remote.lease_held");
+    expect(latestOf(h).row.phase).toBe("failure_pending");
+    expect(heldActivities(h)).toHaveLength(1);
+    h.state.runView = endedView(attempt);
+    h.state.now = T0 + 24 * 3_600_000; // a held lease is never timed out
+    await h.drive();
+    expect(parks.last()).toBe("remote.lease_held");
+    expect(latestOf(h).row.phase).toBe("failure_pending");
   } finally { parks.restore(); }
 });
 
