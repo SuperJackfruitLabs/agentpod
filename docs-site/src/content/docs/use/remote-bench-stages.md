@@ -65,6 +65,13 @@ Switching a stage to `remote` clears its worker and worker arguments. Switching 
      node's user), so it holds whatever `$HOME` or the user's ssh configuration say. When ssh names
      no file a pin can live in (`none`, `/dev/null`, a symlink, or a `HostKeyAlias` for the bench),
      the attach is refused `unavailable` and nothing is written.
+   - `ssh -G` prints file names separated by spaces, so a name with a space in it cannot be read
+     back for certain. The attach is refused the same way when the node user's home directory
+     contains whitespace, or when ssh names a file that is quoted, holds whitespace, or is not a
+     clean absolute path. Give the node user a home without spaces, or name a plain
+     `UserKnownHostsFile` for the bench in its ssh configuration. A custom `UserKnownHostsFile`
+     whose own name contains a space followed by `/` still reads as two files: avoid one.
+   - The node logs the `known_hosts` file it pinned, and whether the attach created it.
    - No certificate, private key or lease token is stored by the hub.
 2. **The turn.**
    - The hub opens a fresh ACP session after the attach, with the workspace root as its working
