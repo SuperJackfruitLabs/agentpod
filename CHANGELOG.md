@@ -133,7 +133,9 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   `known_hosts` path `ssh -G` names contains a space or a quote. `ssh -G`
   prints such a path unquoted, as several words, and attach pinned the first
   word: a file ssh never reads, so Hermes's `accept-new` trusted the first host
-  key that answered. Every path on the line must now be a clean absolute path.
+  key that answered. Every path on the line must now be a clean absolute path,
+  and a node whose user's home directory contains whitespace is refused before
+  ssh is asked.
 - An operator's settlement of a checkpoint attempt is audited as soon as the
   retirement is recorded. The audit was written only after the remote stage's
   agent was stopped, which waits on its node and can fail, so a settlement could

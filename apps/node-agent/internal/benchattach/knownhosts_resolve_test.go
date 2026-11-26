@@ -209,3 +209,39 @@ func TestAttachLogsTheKnownHostsItPinned(t *testing.T) {
 		t.Errorf("log carries key material: %q", got)
 	}
 }
+
+// A node user whose home contains whitespace is refused before ssh is asked: its known_hosts
+// path would print as several words.
+func TestSSHKnownHostsRefusesAHomeWithWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		homes []string
+		ok    bool
+	}{
+		{"a normal home", []string{"/home/agent"}, true},
+		{"$HOME and passwd agree", []string{"/home/agent", "/home/agent"}, true},
+		{"a spaced home", []string{"/home/my agent"}, false},
+		{"a tab in the home", []string{"/home/my\tagent"}, false},
+		{"passwd's home is spaced", []string{"/home/agent", "/Users/my agent"}, false},
+	} {
+		if err := homesWithoutWhitespace(tc.homes); (err == nil) != tc.ok {
+			t.Errorf("%s: err = %v, want ok %t", tc.name, err, tc.ok)
+		}
+	}
+	// SSHKnownHosts itself refuses, and never runs ssh.
+	bin := t.TempDir()
+	ran := filepath.Join(t.TempDir(), "ran")
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\n: > "+ran+"\nprintf 'userknownhostsfile /home/my agent/.ssh/known_hosts\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	prior := nodeHomes
+	nodeHomes = func() []string { return []string{"/home/my agent"} }
+	t.Cleanup(func() { nodeHomes = prior })
+	if got, err := SSHKnownHosts(context.Background(), benchU, "100.64.0.9", 2222); err == nil {
+		t.Errorf("a spaced home answered %q", got)
+	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Error("ssh was asked despite a spaced home")
+	}
+}

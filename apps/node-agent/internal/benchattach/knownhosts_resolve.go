@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // KnownHostsResolver names the known_hosts file the station's ssh reads the bench's host key
@@ -26,6 +28,9 @@ type KnownHostsResolver func(ctx context.Context, user, host string, port int) (
 // in a file ssh does not read is no pin: the first key that answers would be trusted. The node runs
 // Hermes's ACP sessions as its own user, so `ssh -G` here resolves for the user that connects.
 func SSHKnownHosts(ctx context.Context, user, host string, port int) (string, error) {
+	if err := homesWithoutWhitespace(nodeHomes()); err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	args := []string{"-G", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
@@ -39,6 +44,31 @@ func SSHKnownHosts(ctx context.Context, user, host string, port int) (string, er
 	return knownHostsFromConfig(out)
 }
 
+// nodeHomes answers the home directories of the user the node runs as: `$HOME`, and the passwd
+// entry's when it differs (OpenSSH expands `~` from the passwd entry). A test replaces it.
+var nodeHomes = func() []string {
+	var homes []string
+	if h, err := os.UserHomeDir(); err == nil {
+		homes = append(homes, h)
+	}
+	if u, err := user.Current(); err == nil && u.HomeDir != "" && (len(homes) == 0 || homes[0] != u.HomeDir) {
+		homes = append(homes, u.HomeDir)
+	}
+	return homes
+}
+
+// homesWithoutWhitespace refuses a node user whose home contains whitespace: the default
+// known_hosts path then has a space in it, which `ssh -G` prints unquoted and which cannot be told
+// from two paths (see knownHostsFromConfig).
+func homesWithoutWhitespace(homes []string) error {
+	for _, h := range homes {
+		if strings.IndexFunc(h, unicode.IsSpace) >= 0 {
+			return fmt.Errorf("benchattach: the node's user has the home directory %q, which contains whitespace, so ssh -G cannot name its known_hosts one way only; run the node as a user whose home has none", h)
+		}
+	}
+	return nil
+}
+
 // knownHostsFromConfig reads `ssh -G` output: the first UserKnownHostsFile, refused when it is not a
 // clean absolute path, when it is `none` or the null device, and when ssh would look the bench's key
 // up under a HostKeyAlias (the pin names the address).
@@ -48,6 +78,11 @@ func SSHKnownHosts(ctx context.Context, user, host string, port int) (string, er
 // refused unless it reads one way only: a path with a quote or any whitespace other than the single
 // separating spaces, and any value that is not a clean absolute path, refuse the attach. A pin in a
 // truncated path would be a file ssh never reads, and Hermes's accept-new would trust the first key.
+//
+// Known limit: a UserKnownHostsFile the operator wrote with a space followed by `/` (say
+// `"/srv/a /b"`) prints as two clean absolute paths, and the first is pinned. No reading of `ssh -G`
+// output can tell them apart; a home with whitespace, the common source of a spaced path, is
+// refused in SSHKnownHosts before ssh is asked.
 func knownHostsFromConfig(out []byte) (string, error) {
 	var files []string
 	for _, line := range strings.Split(string(out), "\n") {
