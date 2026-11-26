@@ -69,6 +69,13 @@ describe("parseCallMember", () => {
     expect(parseCallMember(member({ content: {} }), DOMAIN)?.joined).toBe(false);
   });
 
+  test("a leave the server fired itself (delayed leave) is a leave: empty content, prev_content kept aside", () => {
+    // tuwunel 2.0.0 probe: a delayed leave reaches the transaction as `content: {}` with the old
+    // membership under `unsigned.prev_content`. The previous content says nothing about now.
+    const fired = { ...member({ content: {} }), unsigned: { prev_content: member().content } };
+    expect(parseCallMember(fired, DOMAIN)?.joined).toBe(false);
+  });
+
   test("not a call: another type, no state key, no room", () => {
     expect(parseCallMember({ ...member(), type: "m.room.message" }, DOMAIN)).toBeNull();
     expect(parseCallMember({ ...member(), state_key: undefined }, DOMAIN)).toBeNull();

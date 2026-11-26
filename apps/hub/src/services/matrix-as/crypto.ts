@@ -695,10 +695,18 @@ export type { RequestType };
  * mentioned only by a device-list change: a machine that is never told its
  * peer rotated a device keeps encrypting to a device that is gone.
  *
- * `toDevice` is passed to each of them whole. The events carry no routing of
- * their own in MSC3202, and olm ignores what is not addressed to it — so
- * handing every agent the full list is correct, if wasteful, where trying to
- * pre-sort it would risk dropping a key someone needed.
+ * **Each machine is handed only what is addressed to its own device.** An agent can hold more than
+ * one device — its superdial call device, `SUPERDIAL`, is the second — and the homeserver pushes
+ * the appservice everything for every one of them: to-device messages (routed by `to_user_id` /
+ * `to_device_id`), one-time-key counts and fallback types. The call device's Olm messages and
+ * call keys belong to superdial-agent's own Olm account, and its counts to its own key pool.
+ * A to-device event with no routing fields (an older homeserver) still goes to every machine, as
+ * it always did: olm ignores what is not addressed to it.
+ *
+ * Two more things a machine is not told, because both cost a key upload or a key share for
+ * nothing: its own user's device-list change (the call device's login is reported as one), and
+ * — when the transaction does not report it — "no unused fallback key", which an empty list would
+ * say. The last list the hub device reported stands in instead.
  */
 export async function feedAgents(
   crypto: AgentCrypto,
@@ -754,18 +762,47 @@ export async function feedAgents(
    */
   if (tx.deviceLists.changed.length > 0) for (const user of crypto.loadedAgents()) agents.add(user);
 
+  const remembered = lastFallbackKeys(crypto);
   for (const userId of agents) {
-    // MSC3202 reports counts per device; only the hub's own device's are read. An agent named
-    // here only by a device-list change gets none, as before.
-    const device = tx.otkCounts[userId] || tx.unusedFallbackKeys[userId] ? await ownDevice(userId) : "";
+    // MSC3202 reports counts per device; only the hub's own device's are read.
+    const device = await ownDevice(userId);
     const otk: Record<string, number> = { ...tx.otkCounts[userId]?.[device] };
-    const fallback = new Set<string>(tx.unusedFallbackKeys[userId]?.[device] ?? []);
+    const reported = tx.unusedFallbackKeys[userId]?.[device];
+    if (reported) remembered.set(userId, [...reported]);
+    const fallback = reported ?? remembered.get(userId) ?? ["signed_curve25519"];
 
     await crypto.receive(userId, {
-      toDevice: tx.toDevice,
-      deviceLists: tx.deviceLists,
+      toDevice: tx.toDevice.filter((event) => addressedTo(event, userId, device)),
+      deviceLists: {
+        changed: tx.deviceLists.changed.filter((u) => u !== userId),
+        left: tx.deviceLists.left.filter((u) => u !== userId),
+      },
       otkCounts: otk,
-      unusedFallbackKeys: [...fallback],
+      unusedFallbackKeys: [...new Set(fallback)],
     });
   }
+}
+
+/** The last unused-fallback list each agent's own device reported, per crypto instance. */
+const fallbackMemory = new WeakMap<AgentCrypto, Map<string, string[]>>();
+function lastFallbackKeys(crypto: AgentCrypto): Map<string, string[]> {
+  let memory = fallbackMemory.get(crypto);
+  if (!memory) {
+    memory = new Map();
+    fallbackMemory.set(crypto, memory);
+  }
+  return memory;
+}
+
+/**
+ * Whether a pushed to-device event is for this agent's own device: MSC2409 routes it with
+ * `to_user_id` and `to_device_id` (`*` is every device). An event without them is kept.
+ */
+function addressedTo(event: unknown, userId: string, deviceId: string): boolean {
+  if (event === null || typeof event !== "object") return true;
+  const toUser: unknown = Reflect.get(event, "to_user_id");
+  const toDevice: unknown = Reflect.get(event, "to_device_id");
+  if (typeof toUser === "string" && toUser !== userId) return false;
+  if (typeof toDevice === "string" && toDevice !== "*" && toDevice !== deviceId) return false;
+  return true;
 }
