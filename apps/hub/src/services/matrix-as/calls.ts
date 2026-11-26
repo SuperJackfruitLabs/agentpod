@@ -23,6 +23,7 @@ import { createCallDeviceProvisioner, type CallDevice } from "./call-device";
 import { callRoomFor, createCallWatcher, type CallMemberEvent, type CallRoom } from "./call-members";
 import { callTurnOutcome, callTurnSession, forgetCallTurns, markCallTurnCancelled } from "./call-turns";
 import type { CallTurnReply } from "./outbound-state";
+import { checkCallMembership, createMembershipReader, type MembershipAnswer } from "./call-membership";
 
 const log = createLogger("matrix-calls");
 
@@ -41,6 +42,8 @@ export interface CallsDeps {
   sessionFor?: (sessionId: string) => Promise<{ userId: string; roomId: string } | null>;
   /** `cancelTurn` from the ACP module: `session/cancel`, or a Salaam cancellation intent. */
   cancel(userId: string, sessionId: string): Promise<void>;
+  /** A person's membership of a room, read live from the homeserver as `asUser` (C4). */
+  membershipOf(asUser: string, roomId: string, userId: string): Promise<string | null>;
 }
 
 export interface Calls {
@@ -57,6 +60,8 @@ export interface Calls {
   replyToCall(reply: CallTurnReply): Promise<void>;
   /** Spoken turns whose prompt never reached the agent: each closed `error`, with no text. */
   replyUnanswered(roomId: string, turnIds: string[]): Promise<void>;
+  /** C4: may this person have a LiveKit token for this room? Throws when it cannot be told. */
+  membership(input: { userId: string; roomId: string }): Promise<MembershipAnswer>;
 }
 
 /** The owner of a session and the room it answers in, or null. */
@@ -135,6 +140,13 @@ export function createCalls(deps: CallsDeps): Calls {
       forgetCallTurns(turnIds);
     },
 
+    membership: (input) =>
+      checkCallMembership(input, {
+        enabled: deps.config.enabled,
+        roomFor,
+        membershipOf: (asUser, roomId, userId) => deps.membershipOf(asUser, roomId, userId),
+      }),
+
     async replyUnanswered(roomId, turnIds) {
       for (const turnId of turnIds) await close(roomId, turnId, "", "error");
       forgetCallTurns(turnIds);
@@ -188,5 +200,6 @@ export function callsForBridge(
     callDeviceFor: createCallDeviceProvisioner({ homeserverUrl: bridge.homeserverUrl, asToken: bridge.asToken }),
     voiceFor: async (stationId) => (await speechSettings.getStationView(stationId)).effective.voice,
     cancel: (userId, sessionId) => cancelTurn(userId, sessionId),
+    membershipOf: createMembershipReader({ homeserverUrl: bridge.homeserverUrl, asToken: bridge.asToken }),
   });
 }

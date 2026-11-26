@@ -1612,6 +1612,22 @@ agent's room is ignored here and refused by SuperExchange's token service.
 it was running that turn, and stops nothing for a turn in another room. A harness that ignores
 `session/cancel` keeps working and its answer still lands in the room, which is harmless.
 
+**The membership check.** Before SuperExchange's token service mints a LiveKit token it asks
+`POST /internal/superdial/membership` (bearer `SUPERDIAL_MEMBERSHIP_TOKEN`, body
+`{"user_id", "room_id"}`). The hub answers `{"allowed": true, "agent_user_id", "station_id"}` for
+someone joined to a bridge agent's room, read live from the homeserver as the agent, or
+`{"allowed": false, "reason"}` with `calls_disabled`, `not_agent_room`, `harness_mode` or
+`not_member`. A homeserver that cannot answer gets `503`, never an allow. superdial-agent asks
+for its own token the same way, as the agent, and is allowed because the agent is in its room.
+
+**Spoken turns.** A message with `dev.superdial.spoken` naming the room's own agent is prompted
+with `[Spoken in a call, transcribed. Answer briefly, in plain sentences without markdown.]` in
+front of the words. When the turn ends the room gets the answer as usual and superdial-agent gets
+the whole text once, with `outcome` `ok`, `cancelled` (the caller hung up) or `error`; no voice
+note is posted for it. Messages that queued behind a turn and went to the agent together are
+answered once: the last spoken one gets the text and the earlier ones are closed `cancelled`. A
+typed message during a call is answered in the room only.
+
 The `/internal/superdial/*` routes are for machines on the same host or Docker network. Do not
 publish them on the hub's public hostname; their bearers are what hold if they are.
 

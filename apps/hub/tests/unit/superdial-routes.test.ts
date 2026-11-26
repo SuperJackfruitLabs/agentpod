@@ -18,6 +18,7 @@ function app(opts: { calls?: "on" | "off"; agentToken?: string; membershipToken?
       ? null
       : {
           cancelTurn: async (turnId: string, roomId: string) => void cancels.push({ turnId, roomId }),
+          membership: async () => ({ allowed: false as const, reason: "not_member" as const }),
         };
   const routes = createSuperdialRoutes({
     agentToken: opts.agentToken ?? "loopback-secret",
@@ -67,5 +68,82 @@ describe("POST /internal/superdial/turns/{turn_id}/cancel", () => {
   test("with calls off it answers 204 and stops nothing", async () => {
     const { app: a } = app({ calls: "off" });
     expect((await cancel(a, { room_id: ROOM })).status).toBe(204);
+  });
+});
+
+function membershipApp(answer: (input: { userId: string; roomId: string }) => Promise<unknown>, on = true) {
+  const asked: Array<{ userId: string; roomId: string }> = [];
+  const routes = createSuperdialRoutes({
+    agentToken: "loopback-secret",
+    membershipToken: "membership-secret",
+    calls: on
+      ? {
+          cancelTurn: async () => {},
+          membership: async (input) => {
+            asked.push(input);
+            return answer(input) as never;
+          },
+        }
+      : null,
+  });
+  return { app: new Hono().route("/internal/superdial", routes), asked };
+}
+
+function ask(a: Hono, body: unknown, auth: string | null = "Bearer membership-secret") {
+  return a.request("/internal/superdial/membership", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(auth ? { Authorization: auth } : {}) },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
+
+const ALLOWED = { allowed: true, agent_user_id: "@agent_ada:id.agentpod.dev", station_id: "station_ada" };
+
+
+describe("POST /internal/superdial/membership", () => {
+  test("answers what the check answers", async () => {
+    const { app: a, asked } = membershipApp(async () => ALLOWED);
+    const res = await ask(a, { user_id: "@rakesh:id.agentpod.dev", room_id: ROOM });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(ALLOWED);
+    expect(asked).toEqual([{ userId: "@rakesh:id.agentpod.dev", roomId: ROOM }]);
+  });
+
+  test("calls off: calls_disabled", async () => {
+    const { app: a } = membershipApp(async () => ALLOWED, false);
+    const res = await ask(a, { user_id: "@rakesh:id.agentpod.dev", room_id: ROOM });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ allowed: false, reason: "calls_disabled" });
+  });
+
+  test("a wrong or missing bearer, or the agent's, is 401", async () => {
+    const { app: a, asked } = membershipApp(async () => ALLOWED);
+    for (const auth of ["Bearer nope", null, "Bearer loopback-secret"]) {
+      expect((await ask(a, { user_id: "@p:s", room_id: ROOM }, auth)).status).toBe(401);
+    }
+    expect(asked).toEqual([]);
+  });
+
+  test("an unconfigured token refuses everyone", async () => {
+    const routes = createSuperdialRoutes({ agentToken: "x", membershipToken: "", calls: null });
+    const a = new Hono().route("/internal/superdial", routes);
+    expect((await ask(a, { user_id: "@p:s", room_id: ROOM }, "Bearer ")).status).toBe(401);
+  });
+
+  test("a body without both ids is 400", async () => {
+    const { app: a, asked } = membershipApp(async () => ALLOWED);
+    for (const body of [{}, { user_id: "@p:s" }, { room_id: ROOM }, { user_id: 1, room_id: ROOM }, "nope"]) {
+      expect((await ask(a, body)).status).toBe(400);
+    }
+    expect(asked).toEqual([]);
+  });
+
+  test("a check that could not be answered is 503, never an allow or a not_member", async () => {
+    const { app: a } = membershipApp(async () => {
+      throw new Error("matrix member state failed: 502");
+    });
+    const res = await ask(a, { user_id: "@rakesh:id.agentpod.dev", room_id: ROOM });
+    expect(res.status).toBe(503);
+    expect(await res.json()).not.toHaveProperty("allowed");
   });
 });

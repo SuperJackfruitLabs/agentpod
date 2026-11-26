@@ -44,6 +44,7 @@ function harness(opts: { voice?: () => Promise<string>; device?: () => Promise<{
     roomFor: async (roomId) => (roomId === ROOM ? ROOM_ROW : null),
     sessionFor: async (sessionId) => (sessionId === "acps_1" ? { userId: "user_owner", roomId: ROOM } : null),
     cancel: async (userId, sessionId) => void cancels.push({ userId, sessionId }),
+    membershipOf: async () => "join",
   });
   return { calls, joins, leaves, replies, cancels };
 }
