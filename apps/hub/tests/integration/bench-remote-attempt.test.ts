@@ -104,6 +104,8 @@ const seen = {
   runEnded: false,
   /** The bench host's node's answer to `status`, when set (a node told its run ended stops, releases and answers stale_owner). */
   statusReply: undefined as Record<string, unknown> | undefined,
+  /** The bench host's node's `status` asks the hub's current decision (observe), as the real node does. */
+  statusDecides: false,
   /** Runs the hub failed on the board. */
   failed: [] as string[],
   /** The agent's node's refusal of the next attach, when set. */
@@ -140,7 +142,12 @@ function benchNodeAnswers() {
       seen.bench.push({ operation: sent.operation, params });
       const own = { version: "agentpod.bench-coordinator.v1", operation: sent.operation, identity: attempt.request.identity, target: profile.target };
       let data: Record<string, unknown>;
-      if (sent.operation === "status" && seen.statusReply) data = { version: own.version, operation: "status", ...seen.statusReply };
+      // As the bench host's node does: its status asks the hub's own current decision, and retires its record on stale_owner.
+      const decided = sent.operation === "status" && seen.statusDecides
+        ? await decide("attach", params, { phase: "observe", execute_request_sha256: undefined, binding_sha256: undefined }) : undefined;
+      if (decided) data = decided.code === "stale_owner" ? { version: own.version, operation: "status", state: "refused", code: "stale_owner" }
+        : { ...own, state: "pending", detail: { lease: "held", message: "workspace has uncommitted or untracked files: notes.txt" } };
+      else if (sent.operation === "status" && seen.statusReply) data = { version: own.version, operation: "status", ...seen.statusReply };
       else if (sent.operation === "prepare" || sent.operation === "status") data = { ...own, state: "prepared", source: completionFor.source };
       else if (sent.operation === "attach" || sent.operation === "finish") {
         const current = await decide(sent.operation, params);
@@ -448,6 +455,8 @@ async function rowOn(station: string, phase: string, remote: Record<string, unkn
   const terminal = phase === "reported";
   await db.insert(checkpointDispatches).values({ ...first, attemptId: "attempt_" + crypto.randomUUID().replaceAll("-", ""),
     leaseEpoch: Math.floor(Math.random() * 1e9) + 10, profile: copy, phase, remote: remote === null ? null : canonicalCheckpoint(remote),
+    failure: phase === "failure_pending" ? JSON.stringify({ at: new Date().toISOString(), by: "hub", code: "remote.dirty", disposition: "failed",
+      phase: "finish_pending", reason: "Checkpoint failed: fixture." }) : null,
     ...(terminal ? {} : { prepared: null, source: null, sourceReceipt: null, completion: null, settlementBody: null, settlementSHA256: null,
       settlementReceipt: null }) });
 }
@@ -464,10 +473,15 @@ test("a station stays busy from its claim, and while the agent's node may still 
   await rowOn(stationNamed("s"), "reported", { ...state, attached: false, agentAttachSent: true, detached: false });
   // Settled and detached: free.
   await rowOn(stationNamed("d"), "reported", { ...state, detached: true });
+  // Failed but its bench not yet released (held for an operator), detached: still busy. A one-shot one is not.
+  await rowOn(stationNamed("f"), "failure_pending", { ...state, detached: true });
+  await rowOn(stationNamed("g"), "failure_pending", null, false);
   expect(await stationBenchBusy(tenantId, stationNamed("p"))).toBe(true);
   expect(await stationBenchBusy(tenantId, stationNamed("o"))).toBe(false);
   expect(await stationBenchBusy(tenantId, stationNamed("u"))).toBe(true);
   expect(await stationBenchBusy(tenantId, stationNamed("s"))).toBe(true);
+  expect(await stationBenchBusy(tenantId, stationNamed("f"))).toBe(true);
+  expect(await stationBenchBusy(tenantId, stationNamed("g"))).toBe(false);
   expect(await stationBenchBusy(tenantId, stationNamed("d"))).toBe(false);
 });
 
@@ -616,20 +630,22 @@ test("an operator's retirement of a remote attempt stops its agent and detaches 
 test("a remote attempt the agent's node refused is a stale owner to the bench node, which is told so it releases", async () => {
   await onRun("r7", async () => {
     seen.attachRefusal = { state: "refused", code: "credential_files", message: "the profile mounts credential files" };
+    seen.statusDecides = true;
     try {
       const client = await checkpointAgentClient(profile);
       const told = seen.bench.length;
       expect(await driveCheckpointAttempt(attempt, client, true, deps())).toMatchObject({ status: "failed" });
       expect(seen.failed).toEqual([selected.runId]);
       expect((await stored()).phase).toBe("failed");
-      // The bench node's record still holds the lease: it is told, and every check it makes is a stale owner.
+      // The bench node's record still holds the lease: it is told while the attempt is failure_pending (its own
+      // decision is already stale_owner, so it releases before the board is told), and every later check is too.
       expect(seen.bench.slice(told).map((c) => c.operation)).toEqual(["prepare", "attach", "status"]);
       const lastAttach = seen.bench.filter((c) => c.operation === "attach").at(-1)?.params;
       if (!lastAttach) throw new Error("no attach");
       expect(await decide("attach", lastAttach)).toEqual({ decision: "refused", code: "stale_owner" });
       expect(await decide("attach", lastAttach, { phase: "observe", execute_request_sha256: undefined, binding_sha256: undefined }))
         .toEqual({ decision: "refused", code: "stale_owner" });
-    } finally { seen.attachRefusal = undefined; seen.runEnded = false; }
+    } finally { seen.attachRefusal = undefined; seen.runEnded = false; seen.statusDecides = false; }
   });
 });
 

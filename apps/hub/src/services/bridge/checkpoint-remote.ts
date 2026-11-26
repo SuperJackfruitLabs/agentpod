@@ -70,7 +70,8 @@ export const REMOTE_RESUME_PROMPT = "Your previous turn was interrupted; the wor
 /** After a re-attach failed, how long before it is tried again (each try asks both nodes and opens a session). */
 export const REMOTE_REATTACH_RETRY_MS = 60_000;
 /** From the claim to the finish: a remote attempt in one of these phases holds its station. */
-const HOLDING_PHASES = ["prepare_pending", "prepared", "source_pending", "admitted", ...CHECKPOINT_REMOTE_PHASES];
+// failure_pending too: a failed remote attempt whose bench is not yet released (held for an operator) keeps its station.
+const HOLDING_PHASES = ["prepare_pending", "prepared", "source_pending", "admitted", ...CHECKPOINT_REMOTE_PHASES, "failure_pending"];
 
 /** The Hub's pieces a remote phase uses beyond the drive's: the station's ACP port, and seams for tests. */
 export interface RemoteSeams {

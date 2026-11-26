@@ -250,6 +250,9 @@ const NOTHING_RUNNING_PHASES: ReadonlySet<string> = new Set(["prepare_pending", 
 const NODE_TERMINAL_CODES: ReadonlySet<string> = new Set(["stale_owner", "verification_failed", "unsupported", "capacity_exhausted"]);
 /** After execute: how long past the task's own timeout the Hub waits for the node to confirm it stopped. */
 export const RUN_ENDED_GRACE_MS = 15 * 60_000;
+/** Past the task's own timeout plus the grace period since the row last changed: a node that never answers stops holding the station. */
+const pastRunEndedBound = (attempt: RetainedCheckpointAttempt, deps: CheckpointDriveDeps): boolean =>
+  deps.now() >= attempt.row.updatedAt.getTime() + attempt.request.task.timeout_seconds * 1000 + RUN_ENDED_GRACE_MS;
 
 /**
  * Tell the node the run ended: one `status` for the attempt's exact retained identity. The node asks
@@ -277,18 +280,31 @@ async function tellNode(attempt: RetainedCheckpointAttempt, deps: CheckpointDriv
   }
 }
 
+/** How SuperBench begins its refusal of a dirty tree, which the bench host's node carries as the held lease's message. */
+const DIRTY_MESSAGE = "workspace has uncommitted or untracked files";
+/** What a remote attempt's bench host's node said after the attempt ended. */
+type RemoteRelease = { state: "released" | "held" | "unknown"; reason: CheckpointRefusalReason; node: Awaited<ReturnType<typeof tellNode>> };
+
 /**
- * A remote attempt's failure is often the agent's node's or the hub's, never heard by the bench host's
- * node, whose record still holds the lease and its certificate. Once the failure is closed the run is
- * over, so one `status` has that node ask the hub's decision (stale_owner) and release. Best effort:
- * a lost tell leaves the lease to the card's next attempt or its clearing, as before.
+ * A remote attempt that failed or whose run ended (operator ruling, 2026-11-26): its bench host's node
+ * is told, and retires its record. A clean tree is checkpointed there (the agent's commits are kept)
+ * and the lease released: `released`. A dirty tree is never discarded: SuperBench refuses the release
+ * and the lease stays held for an operator, `held`, said once on the card with the operator's steps and
+ * at warn here. Anything else (no reply, a reply that proves nothing) is `unknown` and asked again. The
+ * attempt's failure stays its own: the checkpoint only frees the lease.
  */
-async function releaseRemoteBench(attempt: RetainedCheckpointAttempt, deps: CheckpointDriveDeps): Promise<void> {
-  if (!isRemoteProfile(attempt.profile)) return;
+async function remoteRelease(attempt: RetainedCheckpointAttempt, deps: CheckpointDriveDeps, client: SuperpipelineClient | undefined): Promise<RemoteRelease> {
   const node = await tellNode(attempt, deps);
-  const terminal = node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code);
-  if (!terminal) log.warn("remote checkpoint attempt failed; the bench host's node did not confirm its lease released",
-    { tenantId: attempt.row.tenantId, attemptId: attempt.row.attemptId, reply: node.reply?.state ?? node.error });
+  if (node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code)) return { state: "released", reason: "remote.released", node };
+  if (leaseHeld(node.reply)) {
+    const message = node.reply && "detail" in node.reply ? node.reply.detail?.message ?? "" : "";
+    const reason: CheckpointRefusalReason = message.startsWith(DIRTY_MESSAGE) ? "remote.held_dirty" : "remote.lease_held";
+    if (client && node.reply) await sayLeaseHeld(client, attempt, node.reply, attempt.row.phase);
+    else log.warn("checkpoint bench lease held after a refused release; operator action needed", { tenantId: attempt.row.tenantId,
+      attemptId: attempt.row.attemptId, phase: attempt.row.phase, benchKey: retainedBenchKey(attempt) });
+    return { state: "held", reason, node };
+  }
+  return { state: "unknown", reason: node.reply ? `remote.release.${node.reply.state}` : "remote.release.unreachable", node };
 }
 
 /**
@@ -315,25 +331,35 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
     attemptId: attempt.row.attemptId, phase, board: ended.reason };
   try {
     if (phase === "failure_pending") {
+      // A remote attempt's bench is released, or held for an operator, before the failure closes: a held
+      // one keeps the attempt (and so its station) until an operator has released the lease.
+      if (isRemoteProfile(attempt.profile)) {
+        const release = await remoteRelease(attempt, deps, client);
+        if (release.state === "held" || release.state === "unknown" && !pastRunEndedBound(attempt, deps))
+          return parked(attempt, "uncertain", new CheckpointRefused("uncertain", release.reason));
+      }
       const closed = (await deps.close(attempt, "run_ended", ended)).attempt;
-      await releaseRemoteBench(closed, deps);
       const failure = heldFailure(closed);
       log.info("checkpoint run ended on the board; the held failure is closed and nothing was sent to the board", meta);
       return { status: failure.disposition, ...ids, reason: failure.reason };
     }
     if (!RUN_ENDABLE_PHASES.has(phase) && phase !== "submission_pending") throw new CheckpointRefused("source", "retained.phase");
-    const node = await tellNode(attempt, deps);
-    // A remote stage's agent stops with its run: its session ends and its station is detached (a failed detach is the sweep's).
     const remote = (REMOTE_PHASES as readonly string[]).includes(phase);
+    // A remote stage's bench is released (a clean tree checkpointed first) or held for an operator.
+    const release = remote ? await remoteRelease(attempt, deps, client) : undefined;
+    const node = release ? release.node : await tellNode(attempt, deps);
+    // A remote stage's agent stops with its run: its session ends and its station is detached (a failed detach is the sweep's).
     if (remote) await endRemoteWork(attempt, deps, "The card's run ended on the board.");
-    const terminal = node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code);
+    // A held bench is never timed out: the attempt keeps its station until an operator released the lease.
+    if (release?.state === "held") return parked(attempt, "uncertain", new CheckpointRefused("uncertain", release.reason));
+    const terminal = release ? release.state === "released"
+      : node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code);
     let reason: CheckpointRetirementReason;
     if (phase === "submission_pending") reason = "run_ended.unsettled";
     else if (NOTHING_RUNNING_PHASES.has(phase)) reason = "run_ended";
     else if (terminal) reason = remote ? "run_ended" : "run_ended.stopped";
     // execute_pending committed this row's last update, so updatedAt is when execute was sent at the latest.
-    else if (deps.now() >= attempt.row.updatedAt.getTime() + attempt.request.task.timeout_seconds * 1000 + RUN_ENDED_GRACE_MS)
-      reason = "run_ended.unconfirmed";
+    else if (pastRunEndedBound(attempt, deps)) reason = "run_ended.unconfirmed";
     else {
       const why = node.reply ? `${node.reply.state}${"code" in node.reply ? "." + node.reply.code : ""}${leaseHeld(node.reply) ? ".lease_held" : ""}` : undefined;
       // The card is not written to (an activity would heartbeat the unbound run), so the log names the operator's path.
@@ -533,6 +559,8 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           // The node ended its record but could not release the bench: say what an operator must do, while the lease is ours.
           const evidence = heldEvidence(failure);
           if (evidence && leaseHeld(evidence)) await sayLeaseHeld(client, attempt, evidence, failure.phase);
+          // A remote stage's bench host's node is told while the run is still ours, so a held bench is said on the card.
+          const release = isRemoteProfile(attempt.profile) ? await remoteRelease(attempt, deps, client) : undefined;
           let outcome: "fail" | "release" | "lease_ended";
           try {
             if (failure.disposition === "failed") await client.fail(attempt.claim, failure.reason);
@@ -542,8 +570,9 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             if (!isLeaseSuperseded(error)) throw error;
             outcome = "lease_ended";
           }
+          // The board has the failure; a bench not yet released keeps the attempt open (the run-ended branch asks again).
+          if (release && release.state !== "released") return parked(attempt, "uncertain", new CheckpointRefused("uncertain", release.reason));
           attempt = (await deps.close(attempt, outcome)).attempt;
-          await releaseRemoteBench(attempt, deps);
           // A capacity refusal holds the station's checkpoint claims for a while; anything else forgets the card.
           if (failure.code === "capacity_exhausted") deps.capacity?.refused(capacityCard(attempt.claim), failure.disposition === "failed");
           else deps.capacity?.clear(capacityCard(attempt.claim));

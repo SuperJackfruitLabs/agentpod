@@ -13,7 +13,8 @@ import { completedAttemptFixture } from "./checkpoint-completed-attempt.test-fix
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
-import { driveCheckpointAttempt, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
+import { driveCheckpointAttempt, setParkedLogForTests, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
+import { createQuietLog } from "./quiet-log";
 import { endRemoteWork, REMOTE_DIRTY_PROMPT, REMOTE_DIRTY_RETRIES, REMOTE_HEARTBEAT_MS, REMOTE_PHASES, REMOTE_REATTACH_RETRY_MS,
   REMOTE_RENEW_BEFORE_MS, REMOTE_RESUME_PROMPT, resetRemoteTurnsForTests, type RemoteSeams } from "./checkpoint-remote";
 import { sweepRemoteDetach } from "./checkpoint-remote-sweep";
@@ -434,37 +435,110 @@ test("a refusal from the agent's node fails the attach with its code; one about 
   expect(latestOf(again).row.phase).toBe("attach_pending");
 });
 
-test("a failed remote attempt tells the bench host's node once the board has the failure, so its lease is released", async () => {
+const refusedAttach = (h: Harness) => {
+  const request = h.deps.request;
+  h.deps.request = async (node, verb, params, opts) => verb === "bench.remote.attach"
+    ? { ok: true, data: { state: "refused", code: "credential_files", message: "the profile mounts credential files" } }
+    : request(node, verb, params, opts);
+};
+/** The bench host's node holding a dirty tree for an operator (operator ruling, 2026-11-26). */
+const HELD_DIRTY = { state: "pending", detail: { lease: "held",
+  message: "workspace has uncommitted or untracked files; commit or remove them before checkpoint or release: notes.txt" } };
+/** Every park's reason, in order, while the returned restore is not yet called. */
+function captureParks(): { last: () => string | undefined; restore: () => void } {
+  const reasons: string[] = [];
+  const restore = setParkedLogForTests(createQuietLog((_m, meta) => { reasons.push(String(meta?.reason)); }, { now: () => 0, relogMs: 0 }));
+  return { last: () => reasons.at(-1), restore };
+}
+const heldActivities = (h: Harness) => h.state.board.filter((c) => c.path.endsWith("/activities") && JSON.stringify(c.body).includes("lease_held"));
+
+test("a failed remote attempt tells the bench host's node while the run is still ours, and closes once its lease is released", async () => {
   const { attempt } = await remoteAttempt();
   const h = harness(attempt);
-  const request = h.deps.request;
+  refusedAttach(h);
   const failedBeforeStatus: boolean[] = [];
+  const request = h.deps.request;
   h.deps.request = async (node, verb, params, opts) => {
-    if (verb === "bench.remote.attach")
-      return { ok: true, data: { state: "refused", code: "credential_files", message: "the profile mounts credential files" } };
     if (verb === BENCH_COORDINATOR_VERB && BenchCoordinatorRequest.safeParse(params).data?.operation === "status") failedBeforeStatus.push(h.runVerbs().some((c) => c.path.endsWith("/fail")));
     return request(node, verb, params, opts);
   };
   expect((await h.drive()).status).toBe("failed");
-  // The agent's node refused, so the bench node's record still holds the lease: only a status, after the
-  // board's fail, has it ask the hub's decision (now stale_owner) and release.
+  // The agent's node refused, so the bench node's record still holds the lease: one status, before the
+  // board's fail, has it ask the hub's decision (stale_owner), save a clean tree and release.
   const status = h.sent(BENCH_COORDINATOR_VERB, "status");
   expect(status).toHaveLength(1);
   expect(status[0]?.node).toBe(attempt.profile.target.node_id);
-  expect(failedBeforeStatus).toEqual([true]);
+  expect(failedBeforeStatus).toEqual([false]);
+  expect(h.runVerbs().filter((c) => c.path.endsWith("/fail"))).toHaveLength(1);
   expect(latestOf(h).row.phase).toBe("failed");
 
   // A run the board ended before the failure was told takes no run verb, and the bench node is still told.
   const ended = harness((await remoteAttempt()).attempt);
-  const base = ended.deps.request;
-  ended.deps.request = async (node, verb, params, opts) => verb === "bench.remote.attach"
-    ? { ok: true, data: { state: "refused", code: "credential_files", message: "the profile mounts credential files" } }
-    : base(node, verb, params, opts);
+  refusedAttach(ended);
   ended.state.runView = endedView(attempt);
   await ended.drive();
   expect(ended.runVerbs()).toEqual([]);
   expect(ended.sent(BENCH_COORDINATOR_VERB, "status")).toHaveLength(1);
   expect(latestOf(ended).row.phase).toBe("failed");
+});
+
+test("a failed remote attempt whose bench holds a dirty tree waits for an operator, said once, and closes when the lease is released", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  refusedAttach(h);
+  h.state.statusReply = HELD_DIRTY;
+  const parks = captureParks();
+  try {
+  await h.drive();
+  // The board has the failure, but the attempt stays failure_pending (its station held), named for the operator.
+  expect(h.runVerbs().filter((c) => c.path.endsWith("/fail"))).toHaveLength(1);
+  expect(latestOf(h).row.phase).toBe("failure_pending");
+  expect(parks.last()).toBe("remote.held_dirty");
+  const said = heldActivities(h);
+  expect(said).toHaveLength(1);
+  for (const step of ["stop_admin", "renew_admin", "bench workspace run", "bench workspace release"]) expect(JSON.stringify(said[0]?.body)).toContain(step);
+  // Later passes (the run is over now) ask the bench node again; while it is held nothing closes and nothing more is said.
+  h.state.runView = endedView(attempt);
+  h.state.now = T0 + 24 * 3_600_000; // far past any bound: a held bench is never timed out
+  expect((await h.drive()).status).toBe("unreported");
+  expect(parks.last()).toBe("remote.held_dirty");
+  expect(latestOf(h).row.phase).toBe("failure_pending");
+  expect(heldActivities(h)).toHaveLength(1);
+  expect(h.runVerbs().filter((c) => c.path.endsWith("/fail"))).toHaveLength(1);
+  // An operator released the lease: the node's record is terminal, and the failure closes as normal.
+  h.state.statusReply = { state: "refused", code: "stale_owner" };
+  expect((await h.drive()).status).toBe("failed");
+  expect(latestOf(h).row.phase).toBe("failed");
+  expect(h.sent(BENCH_COORDINATOR_VERB, "status")).toHaveLength(3);
+  } finally { parks.restore(); }
+});
+
+test("a remote run the board ended with a dirty bench is held for an operator, never timed out, and retired once released", async () => {
+  const { attempt } = await remoteAttempt();
+  const h = harness(attempt);
+  await h.drive();
+  await h.turn().end("error", {});
+  h.state.now = T0 + 16 * 60_000;
+  h.state.runView = endedView(attempt);
+  h.state.statusReply = HELD_DIRTY;
+  const parks = captureParks();
+  try {
+  expect((await h.drive()).status).toBe("unreported");
+  expect(parks.last()).toBe("remote.held_dirty");
+  expect(heldActivities(h)).toHaveLength(1);
+  expect(h.sent("bench.remote.detach")).toHaveLength(1);
+  // Past the task's own timeout plus the grace period: still held, still the station's.
+  h.state.now = T0 + 3 * 3_600_000;
+  expect((await h.drive()).status).toBe("unreported");
+  expect(parks.last()).toBe("remote.held_dirty");
+  expect(h.state.retired).toEqual([]);
+  expect(latestOf(h).row.phase).toBe("working");
+  expect(heldActivities(h)).toHaveLength(1);
+  h.state.statusReply = { state: "refused", code: "stale_owner" };
+  expect((await h.drive()).status).toBe("released");
+  expect(h.state.retired).toMatchObject([{ reason: "run_ended", by: "hub", phase: "working" }]);
+  expect(h.runVerbs()).toEqual([]);
+  } finally { parks.restore(); }
 });
 
 test("the hub's decision accepts attach and finish only for the bytes it retained, in their phases", async () => {
