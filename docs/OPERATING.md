@@ -1598,6 +1598,23 @@ appservice token. The hub's own crypto device is untouched, and the hub reads on
 one-time-key counts from a transaction. Deleting a row makes the next call mint the device again,
 which replaces its token.
 
+**Joining and leaving.** When a person publishes `org.matrix.msc3401.call.member` in a bridge
+agent's room, the hub asks superdial-agent to join (`PUT /v1/calls/{room_id}` on
+`SUPERDIAL_AGENT_URL`) with the call device's token, the station's voice (its speech settings'
+effective voice; `af_heart` if they cannot be read) and no fixed transcription language. When the
+last person's membership is emptied, it asks superdial-agent to leave (`DELETE`). Both are
+idempotent, so a hub restart in the middle of a call costs nothing. A call in a harness-mode
+agent's room is ignored here and refused by SuperExchange's token service.
+
+**Hanging up mid-turn.** superdial-agent stops the turn it was waiting for with
+`POST /internal/superdial/turns/{turn_id}/cancel` (bearer `SUPERDIAL_AGENT_TOKEN`, body
+`{"room_id"}`), which the hub maps to the session's `cancelTurn`; it answers `204` whether or not
+it was running that turn, and stops nothing for a turn in another room. A harness that ignores
+`session/cancel` keeps working and its answer still lands in the room, which is harmless.
+
+The `/internal/superdial/*` routes are for machines on the same host or Docker network. Do not
+publish them on the hub's public hostname; their bearers are what hold if they are.
+
 ## 8. The superpipeline bridge
 
 The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It

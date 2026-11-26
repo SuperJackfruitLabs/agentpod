@@ -1,0 +1,50 @@
+/**
+ * Spoken turns: which ACP turn each superdial `turn_id` became.
+ *
+ * A message marked `dev.superdial.spoken` (C3) carries the `turn_id` superdial-agent gave what it
+ * heard. When the hub prompts the room's session with it, the id is noted against that session
+ * here, so a cancel from superdial-agent (C6) can find the turn to stop, and the turn's end knows
+ * whether it was cancelled.
+ *
+ * In memory, like the turn triggers in `outbound-state.ts`: a restart ends every turn anyway
+ * (boot reconciliation ends live sessions), and a cancel for a turn the hub no longer knows stops
+ * nothing, which is the truth.
+ */
+
+/** turn_id → the session it was prompted into. */
+const sessions = new Map<string, string>();
+/** turn_ids superdial-agent cancelled while they ran. */
+const cancelled = new Set<string>();
+
+/** Note that these spoken turns were prompted into this session (several when merged). */
+export function noteCallTurns(sessionId: string, turnIds: readonly string[]): void {
+  for (const turnId of turnIds) sessions.set(turnId, sessionId);
+}
+
+/** The session a spoken turn was prompted into, or undefined for one the hub does not know. */
+export function callTurnSession(turnId: string): string | undefined {
+  return sessions.get(turnId);
+}
+
+export function markCallTurnCancelled(turnId: string): void {
+  if (sessions.has(turnId)) cancelled.add(turnId);
+}
+
+/** How a spoken turn ended, for its reply: a cancel wins over an error, an error over ok. */
+export function callTurnOutcome(turnId: string, errored: boolean): "ok" | "cancelled" | "error" {
+  if (cancelled.has(turnId)) return "cancelled";
+  return errored ? "error" : "ok";
+}
+
+/** The turns are over and answered: nothing more will be asked of them. */
+export function forgetCallTurns(turnIds: readonly string[]): void {
+  for (const turnId of turnIds) {
+    sessions.delete(turnId);
+    cancelled.delete(turnId);
+  }
+}
+
+export function resetCallTurnsForTest(): void {
+  sessions.clear();
+  cancelled.clear();
+}

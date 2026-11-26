@@ -12,6 +12,9 @@ export {
 } from "./identity-move";
 export type { MoveState, PreJoinOutcome } from "./identity-move";
 export { missionAlias } from "./missions";
+export type { Calls } from "./calls";
+export { superdialConfig } from "./call-config";
+export type { SuperdialConfig } from "./call-config";
 export { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from "./service";
 export type { MatrixBridge } from "./service";
 export { GENERAL_MISSIONS_KEY, ensureSpaceRecord } from "./spaces";

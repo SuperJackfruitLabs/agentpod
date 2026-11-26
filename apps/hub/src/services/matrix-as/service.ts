@@ -74,6 +74,8 @@ import { createVoiceReplier } from "./voice-reply";
 import { stationForRoom } from "./stations";
 import { resolveSpeechFor } from "../speech";
 import { synthesize } from "../speech";
+import { callsForBridge, type Calls } from "./calls";
+import { CALL_MEMBER_TYPE } from "./call-config";
 
 const log = createLogger("matrix-bridge");
 
@@ -251,6 +253,8 @@ export interface MatrixBridge {
   onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
   /** Release native crypto machines before Bun tears down napi during shutdown. */
   close(): Promise<void>;
+  /** superdial calls (`calls.ts`), or null when they are off. */
+  calls: Calls | null;
 }
 
 /**
@@ -453,6 +457,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   };
 
   const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile, readPersona };
+  const calls = callsForBridge(cfg);
 
   /**
    * Answering a gate, wired only when a board is configured.
@@ -788,6 +793,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     client: speakingClient,
     config: cfg,
     provisionDeps,
+    calls,
 
     expirePermissions: () =>
       expirePermissionsLogged({
@@ -915,6 +921,11 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     },
 
     async onEvent(event) {
+      // A call membership is state, never a message: `handleRoomMessage` would drop it unread.
+      if (event.type === CALL_MEMBER_TYPE) {
+        await calls?.onCallMember(event);
+        return;
+      }
       await handleRoomMessage(event, inboundDeps);
     },
 
