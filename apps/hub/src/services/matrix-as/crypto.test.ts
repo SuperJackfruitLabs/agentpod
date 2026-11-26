@@ -196,6 +196,8 @@ describe("narrowing a transaction to the agents in it", () => {
         // No machine is loaded in these, so a device-list change wakes nobody extra
         // and each case still asserts exactly the narrowing it was written for.
         loadedAgents: () => [],
+        // The hub's own device for every agent in these fixtures.
+        deviceIdFor: async () => "AGENTPOD",
         close: () => {},
       },
     };
@@ -262,7 +264,55 @@ describe("narrowing a transaction to the agents in it", () => {
     expect(fed).toHaveLength(0);
   });
 
-  test("fallback key types are merged across devices", async () => {
+  /**
+   * A bridge agent with a second device — its superdial call device, `SUPERDIAL` — gets both
+   * devices' counts in one transaction. The hub's machine is the `AGENTPOD`-named device only;
+   * the call device's counts are another client's business. Merged with last-one-wins, a call
+   * device reporting 50 would tell the hub its pool is full when it holds 3, and it would stop
+   * topping up until people could no longer start encrypted sessions with the agent.
+   */
+  for (const order of ["hub device first", "call device first"] as const) {
+    test(`a second device's counts never reach the hub's machine (${order})`, async () => {
+      const { fed, crypto } = spy();
+      const hub = { signed_curve25519: 3 };
+      const call = { signed_curve25519: 50 };
+      const otk = order === "hub device first" ? { AGENTPOD: hub, SUPERDIAL: call } : { SUPERDIAL: call, AGENTPOD: hub };
+      const fallback =
+        order === "hub device first"
+          ? { AGENTPOD: [] as string[], SUPERDIAL: ["signed_curve25519"] }
+          : { SUPERDIAL: ["signed_curve25519"], AGENTPOD: [] as string[] };
+      await feedAgents(
+        crypto as any,
+        {
+          toDevice: [],
+          deviceLists: { changed: [], left: [] },
+          otkCounts: { [ALICE]: otk },
+          unusedFallbackKeys: { [ALICE]: fallback },
+        },
+        isOurs,
+      );
+      expect(fed).toEqual([{ userId: ALICE, otk: { signed_curve25519: 3 }, fallback: [] }]);
+    });
+  }
+
+  test("an agent named only by its call device's counts is not fed them", async () => {
+    // The transaction says nothing about the hub's device: feeding the machine `{}` and `[]`
+    // would read as "the fallback key was used" and rotate it for nothing.
+    const { fed, crypto } = spy();
+    await feedAgents(
+      crypto as any,
+      {
+        toDevice: [],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { SUPERDIAL: { signed_curve25519: 50 } } },
+        unusedFallbackKeys: { [ALICE]: { SUPERDIAL: ["signed_curve25519"] } },
+      },
+      isOurs,
+    );
+    expect(fed).toEqual([]);
+  });
+
+  test("fallback key types are read from the hub's own device", async () => {
     const { fed, crypto } = spy();
     await feedAgents(
       crypto as any,

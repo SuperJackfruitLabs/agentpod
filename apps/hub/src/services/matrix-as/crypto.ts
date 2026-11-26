@@ -280,6 +280,13 @@ export interface AgentCrypto {
    */
   loadedAgents(): string[];
   /**
+   * The device this hub's machine speaks as for an agent — the one `deps.deviceIdFor` issued.
+   *
+   * An agent can hold other devices (its superdial call device, `SUPERDIAL`), and a transaction
+   * reports key counts for every one of them; only this one's belong to this machine.
+   */
+  deviceIdFor(userId: string): Promise<string>;
+  /**
    * Close every machine. Awaited, because a machine left to the garbage
    * collector is dropped during process teardown and panics there.
    */
@@ -453,6 +460,10 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
 
     loadedAgents() {
       return [...machines.keys()];
+    },
+
+    deviceIdFor(userId) {
+      return deps.deviceIdFor(userId);
     },
 
     async trackUsers(userId, members) {
@@ -700,8 +711,28 @@ export async function feedAgents(
   isOurs: (userId: string) => boolean,
 ): Promise<void> {
   const agents = new Set<string>();
-  for (const user of Object.keys(tx.otkCounts)) if (isOurs(user)) agents.add(user);
-  for (const user of Object.keys(tx.unusedFallbackKeys)) if (isOurs(user)) agents.add(user);
+  /**
+   * Each agent's own device, the one its machine is: counts for any other device of the same
+   * agent are not this machine's. A bridge agent with a superdial call device (`SUPERDIAL`) has
+   * two, and the first version merged them with the last one winning — the call device's full
+   * pool could then stand in for an empty one here, and the hub would stop topping it up.
+   */
+  const own = new Map<string, string>();
+  const ownDevice = async (user: string): Promise<string> => {
+    let device = own.get(user);
+    if (device === undefined) {
+      device = await crypto.deviceIdFor(user);
+      own.set(user, device);
+    }
+    return device;
+  };
+  for (const user of new Set([...Object.keys(tx.otkCounts), ...Object.keys(tx.unusedFallbackKeys)])) {
+    if (!isOurs(user)) continue;
+    const device = await ownDevice(user);
+    if (tx.otkCounts[user]?.[device] !== undefined || tx.unusedFallbackKeys[user]?.[device] !== undefined) {
+      agents.add(user);
+    }
+  }
   for (const user of tx.deviceLists.changed) if (isOurs(user)) agents.add(user);
 
   /**
@@ -724,18 +755,11 @@ export async function feedAgents(
   if (tx.deviceLists.changed.length > 0) for (const user of crypto.loadedAgents()) agents.add(user);
 
   for (const userId of agents) {
-    // Flattened per device, then merged: MSC3202 reports counts per device,
-    // and this agent has exactly one — `AGENTPOD`, asserted rather than
-    // generated. Merging rather than indexing by that name means a device id
-    // changing here does not silently stop the counts arriving.
-    const otk: Record<string, number> = {};
-    for (const perDevice of Object.values(tx.otkCounts[userId] ?? {})) {
-      for (const [algorithm, count] of Object.entries(perDevice)) otk[algorithm] = count;
-    }
-    const fallback = new Set<string>();
-    for (const list of Object.values(tx.unusedFallbackKeys[userId] ?? {})) {
-      for (const algorithm of list) fallback.add(algorithm);
-    }
+    // MSC3202 reports counts per device; only the hub's own device's are read. An agent named
+    // here only by a device-list change gets none, as before.
+    const device = tx.otkCounts[userId] || tx.unusedFallbackKeys[userId] ? await ownDevice(userId) : "";
+    const otk: Record<string, number> = { ...(tx.otkCounts[userId]?.[device] ?? {}) };
+    const fallback = new Set<string>(tx.unusedFallbackKeys[userId]?.[device] ?? []);
 
     await crypto.receive(userId, {
       toDevice: tx.toDevice,
