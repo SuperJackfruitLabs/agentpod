@@ -66,14 +66,13 @@ func hermesLiveCmd(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "cannot resolve the home directory:", err)
 		return 1
 	}
-	dir := filepath.Join(home, ".hermes", "profiles", profile)
+	dir, unit := hermesProfilePlace(home, profile)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		fmt.Fprintf(errOut, "no Hermes profile at %s\n", dir)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	unit := "hermes-gateway-" + profile + ".service"
 
 	switch action {
 	case "status":
@@ -132,6 +131,16 @@ func hermesLiveCmd(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, usage)
 		return 2
 	}
+}
+
+// hermesProfilePlace is where Hermes keeps a profile and the user unit that runs
+// its gateway. Hermes reserves "default" for its root, ~/.hermes, whose gateway
+// is hermes-gateway.service; every other name lives under profiles/.
+func hermesProfilePlace(home, profile string) (dir, unit string) {
+	if profile == "default" {
+		return filepath.Join(home, ".hermes"), "hermes-gateway.service"
+	}
+	return filepath.Join(home, ".hermes", "profiles", profile), "hermes-gateway-" + profile + ".service"
 }
 
 func printPlan(out io.Writer, plan hermeslive.Plan) {

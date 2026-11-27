@@ -197,7 +197,7 @@ var apnRef = []clidoc.Command{
 	{
 		Path: "hermes-live status", Summary: "The plugin's install state, the Hermes version and whether it is a tested one.",
 		Synopsis: "apn hermes-live status --profile NAME",
-		Handlers: []string{"hermesLiveCmd"}, Flags: []clidoc.Flag{hermesProfile()},
+		Handlers: []string{"hermesLiveCmd"}, Flags: []clidoc.Flag{hermesLiveProfile()},
 		Example: "apn hermes-live status --profile default",
 	},
 	{
@@ -205,14 +205,14 @@ var apnRef = []clidoc.Command{
 		Synopsis: "apn hermes-live enable --profile NAME [--apply] [--replace-unmanaged]",
 		Detail:   "Refused on a Hermes version the plugin was not tested against. " + apnHermesNote,
 		Handlers: []string{"hermesLiveCmd"},
-		Flags: []clidoc.Flag{hermesProfile(), hermesApply(),
+		Flags: []clidoc.Flag{hermesLiveProfile(), hermesApply(),
 			{Name: "replace-unmanaged", Usage: "replace a plugin directory of the same name that this apn did not install"}},
-		Example: "apn hermes-live enable --profile default --apply\nsystemctl --user restart hermes-gateway-default.service",
+		Example: "apn hermes-live enable --profile default --apply\nsystemctl --user restart hermes-gateway.service",
 	},
 	{
 		Path: "hermes-live disable", Summary: "Remove the plugin and undo the config edit.",
 		Synopsis: "apn hermes-live disable --profile NAME [--apply]", Detail: apnHermesNote,
-		Handlers: []string{"hermesLiveCmd"}, Flags: []clidoc.Flag{hermesProfile(), hermesApply()},
+		Handlers: []string{"hermesLiveCmd"}, Flags: []clidoc.Flag{hermesLiveProfile(), hermesApply()},
 		Example: "apn hermes-live disable --profile default --apply",
 	},
 	{
@@ -319,6 +319,12 @@ var apnRef = []clidoc.Command{
 
 func hermesProfile() clidoc.Flag {
 	return clidoc.Flag{Name: "profile", Arg: "NAME", Required: true, Usage: "the Hermes profile, a directory under `~/.hermes/profiles/`"}
+}
+
+// hermesLiveProfile is hermes-live's --profile, which follows Hermes's own
+// names: "default" is the root profile.
+func hermesLiveProfile() clidoc.Flag {
+	return clidoc.Flag{Name: "profile", Arg: "NAME", Required: true, Usage: "the Hermes profile: `default` is the root, `~/.hermes`; any other name is a directory under `~/.hermes/profiles/`"}
 }
 
 func hermesApply() clidoc.Flag {

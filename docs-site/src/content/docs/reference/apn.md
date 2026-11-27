@@ -825,7 +825,7 @@ apn hermes-live status --profile NAME
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--profile NAME` | string | — | The Hermes profile, a directory under `~/.hermes/profiles/`. **Required.** |
+| `--profile NAME` | string | — | The Hermes profile: `default` is the root, `~/.hermes`; any other name is a directory under `~/.hermes/profiles/`. **Required.** |
 
 **Needs:** The user the node service runs as, editing its own files. No hub contact.
 
@@ -845,7 +845,7 @@ Refused on a Hermes version the plugin was not tested against. Without `--apply`
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--profile NAME` | string | — | The Hermes profile, a directory under `~/.hermes/profiles/`. **Required.** |
+| `--profile NAME` | string | — | The Hermes profile: `default` is the root, `~/.hermes`; any other name is a directory under `~/.hermes/profiles/`. **Required.** |
 | `--apply` | bool | `false` | Make the change; without it, print what would change and write nothing. |
 | `--replace-unmanaged` | bool | `false` | Replace a plugin directory of the same name that this apn did not install. |
 
@@ -853,7 +853,7 @@ Refused on a Hermes version the plugin was not tested against. Without `--apply`
 
 ```sh
 apn hermes-live enable --profile default --apply
-systemctl --user restart hermes-gateway-default.service
+systemctl --user restart hermes-gateway.service
 ```
 
 ### apn hermes-live disable
@@ -868,7 +868,7 @@ Without `--apply` it prints the exact change and writes nothing. It never restar
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--profile NAME` | string | — | The Hermes profile, a directory under `~/.hermes/profiles/`. **Required.** |
+| `--profile NAME` | string | — | The Hermes profile: `default` is the root, `~/.hermes`; any other name is a directory under `~/.hermes/profiles/`. **Required.** |
 | `--apply` | bool | `false` | Make the change; without it, print what would change and write nothing. |
 
 **Needs:** The user the node service runs as, editing its own files. No hub contact.

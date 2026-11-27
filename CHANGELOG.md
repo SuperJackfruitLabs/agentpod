@@ -10,6 +10,23 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Fixed
+
+- The Hermes version probe reads an editable git install's release from the tag
+  its checkout sits on (the checkout `direct_url.json` names, HEAD exactly on a
+  release tag, tracked files unchanged). Hermes's git installer leaves package
+  metadata saying `0.0.0`, so `apn hermes-live` and the Console's plugin panel
+  refused agentpod-live on every such station. A checkout between tags or with
+  local changes still reads `0.0.0` and is refused.
+- `apn hermes-live --profile default` is the Hermes root profile, `~/.hermes`,
+  whose gateway is `hermes-gateway.service`, as Hermes itself names it. It looked
+  for `~/.hermes/profiles/default`, which Hermes never creates.
+
+### Changed
+
+- agentpod-live is installable on Hermes up to 0.23.4 (was 0.21.5); the plugin's
+  contract passes on v0.23.4 and v0.23.1.
+
 ## v0.1.134 — 2026-11-26
 
 ### Upgrade notes
