@@ -384,6 +384,55 @@ describe("narrowing a transaction to the agents in it", () => {
     }
   });
 
+  /**
+   * One agent's device id that cannot be read (its store unreadable, its login refused) must not
+   * cost every other agent its share of the transaction: the route swallows the throw and the
+   * homeserver never sends those room keys again.
+   */
+  test("an agent whose device cannot be resolved is skipped, and the others are still fed", async () => {
+    const { fed, crypto } = fullSpy();
+    const failing: AgentCrypto = {
+      ...crypto,
+      deviceIdFor: async (userId) => {
+        if (userId === ALICE) throw new Error("login refused");
+        return "AGENTPOD";
+      },
+    };
+    await feedAgents(
+      failing,
+      {
+        toDevice: [ALICE_HUB, BOB_HUB],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { AGENTPOD: { signed_curve25519: 1 } }, [BOB]: { AGENTPOD: { signed_curve25519: 2 } } },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => [f.userId, f.tx.toDevice, f.tx.otkCounts])).toEqual([[BOB, [BOB_HUB], { signed_curve25519: 2 }]]);
+  });
+
+  test("an agent whose machine refuses its share is skipped, and the others are still fed", async () => {
+    const { fed, crypto } = fullSpy();
+    const failing: AgentCrypto = {
+      ...crypto,
+      receive: async (userId, tx) => {
+        if (userId === ALICE) throw new Error("store locked");
+        await crypto.receive(userId, tx);
+      },
+    };
+    await feedAgents(
+      failing,
+      {
+        toDevice: [ALICE_HUB, BOB_HUB],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { AGENTPOD: { signed_curve25519: 1 } }, [BOB]: { AGENTPOD: { signed_curve25519: 2 } } },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => f.userId)).toEqual([BOB]);
+  });
+
   test("an unreported fallback list repeats the last one the hub device reported", async () => {
     const { fed, crypto } = fullSpy([ALICE]);
     const quiet = { toDevice: [], deviceLists: { changed: ["@rakesh:id.agentpod.dev"], left: [] }, otkCounts: {}, unusedFallbackKeys: {} };

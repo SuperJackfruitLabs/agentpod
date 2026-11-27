@@ -724,19 +724,30 @@ export async function feedAgents(
    * agent are not this machine's. A bridge agent with a superdial call device (`SUPERDIAL`) has
    * two, and the first version merged them with the last one winning — the call device's full
    * pool could then stand in for an empty one here, and the hub would stop topping it up.
+   *
+   * Null for an agent whose device could not be read: that agent is skipped, and logged, and every
+   * other agent is still fed. One throw here used to lose the whole transaction's to-device
+   * messages for everybody (the route swallows it, and the homeserver never sends them again).
    */
-  const own = new Map<string, string>();
-  const ownDevice = async (user: string): Promise<string> => {
-    let device = own.get(user);
-    if (device === undefined) {
+  const own = new Map<string, string | null>();
+  const ownDevice = async (user: string): Promise<string | null> => {
+    if (own.has(user)) return own.get(user) ?? null;
+    let device: string | null = null;
+    try {
       device = await crypto.deviceIdFor(user);
-      own.set(user, device);
+    } catch (err) {
+      log.error("an agent's crypto device could not be read; its share of this transaction is skipped", {
+        agent: user,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
+    own.set(user, device);
     return device;
   };
   for (const user of new Set([...Object.keys(tx.otkCounts), ...Object.keys(tx.unusedFallbackKeys)])) {
     if (!isOurs(user)) continue;
     const device = await ownDevice(user);
+    if (device === null) continue;
     if (tx.otkCounts[user]?.[device] !== undefined || tx.unusedFallbackKeys[user]?.[device] !== undefined) {
       agents.add(user);
     }
@@ -766,20 +777,29 @@ export async function feedAgents(
   for (const userId of agents) {
     // MSC3202 reports counts per device; only the hub's own device's are read.
     const device = await ownDevice(userId);
+    if (device === null) continue;
     const otk: Record<string, number> = { ...tx.otkCounts[userId]?.[device] };
     const reported = tx.unusedFallbackKeys[userId]?.[device];
     if (reported) remembered.set(userId, [...reported]);
     const fallback = reported ?? remembered.get(userId) ?? ["signed_curve25519"];
 
-    await crypto.receive(userId, {
-      toDevice: tx.toDevice.filter((event) => addressedTo(event, userId, device)),
-      deviceLists: {
-        changed: tx.deviceLists.changed.filter((u) => u !== userId),
-        left: tx.deviceLists.left.filter((u) => u !== userId),
-      },
-      otkCounts: otk,
-      unusedFallbackKeys: [...new Set(fallback)],
-    });
+    // Each agent on its own: one machine that refuses its share does not cost the rest theirs.
+    try {
+      await crypto.receive(userId, {
+        toDevice: tx.toDevice.filter((event) => addressedTo(event, userId, device)),
+        deviceLists: {
+          changed: tx.deviceLists.changed.filter((u) => u !== userId),
+          left: tx.deviceLists.left.filter((u) => u !== userId),
+        },
+        otkCounts: otk,
+        unusedFallbackKeys: [...new Set(fallback)],
+      });
+    } catch (err) {
+      log.error("an agent's machine could not take its share of a transaction", {
+        agent: userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 
