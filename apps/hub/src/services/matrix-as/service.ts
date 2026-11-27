@@ -784,7 +784,13 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         },
         speak: voiceReplier.speakTurn,
         // A turn spoken in a superdial call is answered to the call instead of by a voice note.
-        ...(calls ? { callReply: (reply: CallTurnReply) => calls.replyToCall(reply) } : {}),
+        // One the caller cancelled at hang-up ends silently, with no reply to the call.
+        ...(calls
+          ? {
+              callReply: (reply: CallTurnReply) => calls.replyToCall(reply),
+              callTurnCancelled: (turnIds: readonly string[]) => calls.cancelledByCaller(turnIds),
+            }
+          : {}),
       }),
     noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }) => {
       noteTurnTrigger(sessionId, eventId, opts);

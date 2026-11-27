@@ -13,7 +13,7 @@ import { PERMISSION_OUTCOME_TYPE, permissionV2Content, type HarnessPermission } 
 import { harnessPermission } from "./harness-permission";
 import { flush, scheduleFlush } from "./outbound-flush";
 import { log } from "./outbound-log";
-import { mark, reportError, startTyping, stopTyping } from "./outbound-marks";
+import { mark, reportError, startTyping, stopTyping, unmark } from "./outbound-marks";
 import { chunkTextOfKind, errorMessage, isRecord, messageChunkText, permissionRequest } from "./outbound-payloads";
 import { say } from "./outbound-send";
 import { detachEnded, REACTION, SILENT_TURN_NOTICE, type NotedTrigger, type RoomContext } from "./outbound-state";
@@ -171,40 +171,52 @@ async function onTurnEnd(ctx: RoomContext, event: AcpEvent): Promise<void> {
   const { state } = ctx;
   const wasTurn = state.inTurn || state.produced;
   state.inTurn = false;
-  // An error nothing came after is the turn's outcome: report it now,
-  // as it used to be reported the moment it arrived.
-  if (state.pendingError !== null) await reportError(ctx);
-  // A turn that said nothing, ran nothing, and reported nothing is
-  // not a turn that worked. The hub cannot know *why* — the harness
-  // that failed did not say — but it can refuse to call silence
-  // success, and it can tell the reader that their question went
-  // unanswered rather than leaving them to infer it from a tick.
-  //
-  // Nothing is said when nobody asked: an unprompted turn (a cron
-  // job speaking) has no reader waiting and no message to mark.
-  //
-  // A session that ends mid-turn usually says why (the node went
-  // away, the harness exited), and that beats "its own logs will say".
-  // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
-  // hub marks its idle state `silent`) is done, not failed: no
-  // notice, and a ✅ on the message it answered by saying nothing.
   const choseSilence = isRecord(event.payload) && event.payload.silent === true;
-  if (wasTurn) noteTurnFinished(ctx, state.reportedError || (!state.produced && !choseSilence));
-  state.lastTurnCounts = null;
-  if (!state.produced && !state.reportedError && choseSilence) {
-    await mark(ctx, REACTION.done);
-  } else if (!state.produced && !state.reportedError) {
-    await mark(ctx, REACTION.failed);
-    if (state.triggerEventId) {
-      const reason = isRecord(event.payload) ? event.payload.reason : undefined;
-      await say(ctx,
-        typeof reason === "string" && reason.trim() !== ""
-          ? `This turn ended without a reply — ${reason.trim()}`
-          : SILENT_TURN_NOTICE
-      );
+  // The caller hung up while the agent worked, and superdial-agent cancelled the turn. Nobody is
+  // waiting for an answer and nothing failed, so the room is told nothing: an error the cancel
+  // caused ("stopped the turn") is dropped, there is no silence notice, and the 👀 comes off
+  // with no ✅ or ❌. Whatever the agent already said stays in the room.
+  const cancelledByCaller = state.callTurns.length > 0 && ctx.deps.callTurnCancelled?.(state.callTurns) === true;
+  if (cancelledByCaller) {
+    state.pendingError = null;
+    if (wasTurn) noteTurnFinished(ctx, false);
+    state.lastTurnCounts = null;
+    await unmark(ctx);
+  } else {
+    // An error nothing came after is the turn's outcome: report it now,
+    // as it used to be reported the moment it arrived.
+    if (state.pendingError !== null) await reportError(ctx);
+    // A turn that said nothing, ran nothing, and reported nothing is
+    // not a turn that worked. The hub cannot know *why* — the harness
+    // that failed did not say — but it can refuse to call silence
+    // success, and it can tell the reader that their question went
+    // unanswered rather than leaving them to infer it from a tick.
+    //
+    // Nothing is said when nobody asked: an unprompted turn (a cron
+    // job speaking) has no reader waiting and no message to mark.
+    //
+    // A session that ends mid-turn usually says why (the node went
+    // away, the harness exited), and that beats "its own logs will say".
+    // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
+    // hub marks its idle state `silent`) is done, not failed: no
+    // notice, and a ✅ on the message it answered by saying nothing.
+    if (wasTurn) noteTurnFinished(ctx, state.reportedError || (!state.produced && !choseSilence));
+    state.lastTurnCounts = null;
+    if (!state.produced && !state.reportedError && choseSilence) {
+      await mark(ctx, REACTION.done);
+    } else if (!state.produced && !state.reportedError) {
+      await mark(ctx, REACTION.failed);
+      if (state.triggerEventId) {
+        const reason = isRecord(event.payload) ? event.payload.reason : undefined;
+        await say(ctx,
+          typeof reason === "string" && reason.trim() !== ""
+            ? `This turn ended without a reply — ${reason.trim()}`
+            : SILENT_TURN_NOTICE
+        );
+      }
+    } else if (!state.reportedError) {
+      await mark(ctx, REACTION.done);
     }
-  } else if (!state.reportedError) {
-    await mark(ctx, REACTION.done);
   }
   // A turn a call started is answered to the call; any other may be spoken as a voice note.
   if (state.callTurns.length > 0 && ctx.deps.callReply) {

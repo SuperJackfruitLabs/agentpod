@@ -53,6 +53,14 @@ export function markCallTurnCancelled(turnId: string): void {
   if (sessions.has(turnId)) cancelled.add(turnId);
 }
 
+/**
+ * Whether the caller cancelled any of these turns (C6 cancel, at hang-up). Merged turns share one
+ * call, so one cancelled means the call they were spoken in has gone.
+ */
+export function callTurnsCancelled(turnIds: readonly string[]): boolean {
+  return turnIds.some((turnId) => cancelled.has(turnId));
+}
+
 /** How a spoken turn ended, for its reply: a cancel wins over an error, an error over ok. */
 export function callTurnOutcome(turnId: string, errored: boolean): "ok" | "cancelled" | "error" {
   if (cancelled.has(turnId)) return "cancelled";

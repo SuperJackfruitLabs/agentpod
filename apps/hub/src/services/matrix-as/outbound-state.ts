@@ -98,6 +98,12 @@ export interface OutboundDeps {
    * spoken turn is answered like a typed one.
    */
   callReply?: (reply: CallTurnReply) => Promise<unknown>;
+  /**
+   * Did the caller cancel any of these spoken turns (a hang-up while the agent worked)? Such a
+   * turn ends silently in the room: no error, no "ended without a reply" notice, no ✅ or ❌ —
+   * only the 👀 taken off. Optional: without it every turn ends as before.
+   */
+  callTurnCancelled?: (turnIds: readonly string[]) => boolean;
 }
 
 /** A spoken turn's reply, for the call: every turn id it answers (several when merged). */

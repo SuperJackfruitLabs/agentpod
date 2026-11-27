@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { CALL_MEMBER_TYPE, type SuperdialConfig } from "./call-config";
-import type { CallJoin, CallReply, SuperdialAgentClient } from "./call-agent-client";
+import type { CallJoin, CallReply, ReplyResult, SuperdialAgentClient } from "./call-agent-client";
 import type { CallRoom } from "./call-members";
 import { resetCallTurnsForTest, noteCallTurns } from "./call-turns";
 import { createCalls } from "./calls";
@@ -24,7 +24,13 @@ function member(content: Record<string, unknown>) {
 }
 const JOINED = { application: "m.call", call_id: "", scope: "m.room", device_id: "DESKTOP" };
 
-function harness(opts: { voice?: () => Promise<string>; device?: () => Promise<{ deviceId: string; accessToken: string }> } = {}) {
+function harness(
+  opts: {
+    voice?: () => Promise<string>;
+    device?: () => Promise<{ deviceId: string; accessToken: string }>;
+    reply?: ReplyResult;
+  } = {},
+) {
   const joins: Array<{ roomId: string; body: CallJoin }> = [];
   const leaves: string[] = [];
   const replies: Array<{ roomId: string; turnId: string; body: CallReply }> = [];
@@ -32,7 +38,7 @@ function harness(opts: { voice?: () => Promise<string>; device?: () => Promise<{
   const agent: SuperdialAgentClient = {
     joinCall: async (roomId, body) => (joins.push({ roomId, body }), true),
     leaveCall: async (roomId) => (leaves.push(roomId), true),
-    reply: async (roomId, turnId, body) => (replies.push({ roomId, turnId, body }), true),
+    reply: async (roomId, turnId, body) => (replies.push({ roomId, turnId, body }), opts.reply ?? "taken"),
   };
   const calls = createCalls({
     config: CONFIG,
@@ -130,16 +136,39 @@ describe("a spoken turn's reply", () => {
     ]);
   });
 
-  test("a turn cancelled at hang-up is answered cancelled; an error turn, error", async () => {
+  test("a turn the caller cancelled at hang-up gets no reply; an error turn is answered error", async () => {
+    // The cancel came from superdial-agent as it left the call: there is no call to answer, and
+    // E1 (2026-11-27) saw the reply answered 404.
     const { calls, replies } = harness();
     noteCallTurns("acps_1", ["t-cancelled", "t-error"]);
     await calls.cancelTurn("t-cancelled", ROOM);
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-cancelled"], text: "Partial", errored: false });
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-error"], text: "", errored: true });
-    expect(replies.map((r) => [r.turnId, r.body.outcome])).toEqual([
-      ["t-cancelled", "cancelled"],
-      ["t-error", "error"],
-    ]);
+    expect(replies.map((r) => [r.turnId, r.body.outcome])).toEqual([["t-error", "error"]]);
+  });
+
+  test("whether the caller cancelled a turn is known until its end is handled, then forgotten", async () => {
+    const { calls } = harness();
+    noteCallTurns("acps_1", ["t-1", "t-2"]);
+    expect(calls.cancelledByCaller(["t-1", "t-2"])).toBe(false);
+    await calls.cancelTurn("t-2", ROOM);
+    expect(calls.cancelledByCaller(["t-1", "t-2"])).toBe(true);
+    await calls.replyToCall({ roomId: ROOM, turnIds: ["t-1", "t-2"], text: "", errored: false });
+    expect(calls.cancelledByCaller(["t-1", "t-2"])).toBe(false);
+  });
+
+  test("a reply superdial-agent answers 404 (the call is gone) is not warned about", async () => {
+    const warns: unknown[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => void warns.push(args);
+    try {
+      const { calls } = harness({ reply: "gone" });
+      noteCallTurns("acps_1", [TURN]);
+      await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "Late.", errored: false });
+    } finally {
+      console.warn = original;
+    }
+    expect(warns).toEqual([]);
   });
 
   test("merged spoken turns: the last is answered, the earlier ones are closed as cancelled with no text", async () => {

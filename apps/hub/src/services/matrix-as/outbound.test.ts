@@ -2126,6 +2126,57 @@ describe("a spoken turn's end hands its text to the call", () => {
     ]);
   });
 
+  /**
+   * The caller hung up while the agent was thinking, and superdial-agent cancelled the turn (C6).
+   * Nobody is waiting for an answer, and the hang-up is not a failure: E1 (2026-11-27) posted "This
+   * turn ended without a reply — the agent reported no answer and no error." into the room for it.
+   */
+  describe("a spoken turn the caller cancelled", () => {
+    let cancelled: string[] = [];
+    const cancelledDeps = (turnIds: string[]) => {
+      cancelled = turnIds;
+      return { ...callDeps(), callTurnCancelled: (ids: readonly string[]) => ids.some((id) => cancelled.includes(id)) };
+    };
+
+    test("ends with no notice in the room and no failure mark", async () => {
+      attachRoomToSession(SESSION, ROOM, AGENT, cancelledDeps(["turn-1"]));
+      noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });
+      emit(state("working", 1));
+      emit(state("idle", 2));
+      await settle();
+      expect(sent).toEqual([]);
+      expect(reactions.map((r) => r.key)).toEqual(["👀"]);
+      // The 👀 is taken off: the turn is not still running.
+      expect(redacted).toEqual(["$reaction-1"]);
+    });
+
+    test("an error the cancel caused (a harness's stopped turn) is not posted either", async () => {
+      attachRoomToSession(SESSION, ROOM, AGENT, cancelledDeps(["turn-1"]));
+      noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });
+      emit(state("working", 1));
+      emit({
+        sessionId: SESSION,
+        seq: 2,
+        type: "error",
+        payload: { message: "The agent stopped the turn before replying." },
+        createdAt: new Date().toISOString(),
+      });
+      emit(state("idle", 3));
+      await settle();
+      expect(sent).toEqual([]);
+      expect(reactions.map((r) => r.key)).toEqual(["👀"]);
+    });
+
+    test("a spoken turn nobody cancelled that said nothing still gets the notice", async () => {
+      attachRoomToSession(SESSION, ROOM, AGENT, cancelledDeps(["some-other-turn"]));
+      noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });
+      emit(state("working", 1));
+      emit(state("idle", 2));
+      await settle();
+      expect(sent.map((s) => s.body)).toEqual([expect.stringContaining("This turn ended without a reply")]);
+    });
+  });
+
   test("a typed turn after a spoken one is spoken by the voice replier as before, not sent to the call", async () => {
     attachRoomToSession(SESSION, ROOM, AGENT, callDeps());
     noteTurnTrigger(SESSION, "$spoken", { callTurns: ["turn-1"] });

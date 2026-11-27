@@ -29,10 +29,17 @@ export interface CallReply {
   outcome: CallOutcome;
 }
 
+/**
+ * How a reply went: `taken`; `gone`, answered 404 because superdial-agent no longer has that call
+ * or turn (a caller who hung up as the turn ended — expected, not a fault, and never retried); or
+ * `failed`, any other refusal or no answer.
+ */
+export type ReplyResult = "taken" | "gone" | "failed";
+
 export interface SuperdialAgentClient {
   joinCall(roomId: string, body: CallJoin): Promise<boolean>;
   leaveCall(roomId: string): Promise<boolean>;
-  reply(roomId: string, turnId: string, body: CallReply): Promise<boolean>;
+  reply(roomId: string, turnId: string, body: CallReply): Promise<ReplyResult>;
 }
 
 /**
@@ -55,7 +62,7 @@ export function createSuperdialAgentClient(deps: {
   const doFetch = deps.fetch ?? fetch;
   const base = deps.baseUrl.replace(/\/+$/, "");
 
-  async function send(what: string, method: string, path: string, body?: unknown): Promise<boolean> {
+  async function send(what: string, method: string, path: string, body?: unknown): Promise<ReplyResult> {
     try {
       const res = await doFetch(`${base}${path}`, {
         method,
@@ -65,21 +72,25 @@ export function createSuperdialAgentClient(deps: {
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-      if (res.ok) return true;
+      if (res.ok) return "taken";
+      if (res.status === 404 && what === "reply") {
+        log.debug("superdial-agent no longer has the call a reply was for", { what, status: res.status });
+        return "gone";
+      }
       log.warn("superdial-agent refused a call request", { what, status: res.status });
-      return false;
+      return "failed";
     } catch (err) {
       log.warn("superdial-agent could not be reached", {
         what,
         error: err instanceof Error ? err.message : String(err),
       });
-      return false;
+      return "failed";
     }
   }
 
   return {
-    joinCall: (roomId, body) => send("join", "PUT", call(roomId), body),
-    leaveCall: (roomId) => send("leave", "DELETE", call(roomId)),
+    joinCall: async (roomId, body) => (await send("join", "PUT", call(roomId), body)) === "taken",
+    leaveCall: async (roomId) => (await send("leave", "DELETE", call(roomId))) === "taken",
     reply: (roomId, turnId, body) =>
       send("reply", "POST", `${call(roomId)}/turns/${pathSegment(turnId)}/reply`, body),
   };

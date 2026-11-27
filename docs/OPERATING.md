@@ -1623,8 +1623,10 @@ for its own token the same way, as the agent, and is allowed because the agent i
 **Spoken turns.** A message with `dev.superdial.spoken` naming the room's own agent is prompted
 with `[Spoken in a call, transcribed. Answer briefly, in plain sentences without markdown.]` in
 front of the words. When the turn ends the room gets the answer as usual and superdial-agent gets
-the whole text once, with `outcome` `ok`, `cancelled` (the caller hung up) or `error`; no voice
-note is posted for it. Messages that queued behind a turn and went to the agent together are
+the whole text once, with `outcome` `ok` or `error`; no voice note is posted for it. A turn the
+caller cancelled by hanging up ends silently: superdial-agent gets no reply (it has left the call),
+and the room gets no error or "ended without a reply" notice, only the 👀 taken off. A reply that
+superdial-agent answers `404` (the call ended first) is logged at debug and not retried. Messages that queued behind a turn and went to the agent together are
 answered once: the last spoken one gets the text and the earlier ones are closed `cancelled`. A
 typed message during a call is answered in the room only.
 

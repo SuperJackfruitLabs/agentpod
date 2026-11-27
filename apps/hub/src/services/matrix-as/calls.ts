@@ -21,7 +21,7 @@ import { DEFAULT_CALL_VOICE, superdialConfig, type SuperdialConfig } from "./cal
 import { createSuperdialAgentClient, type SuperdialAgentClient } from "./call-agent-client";
 import { createCallDeviceProvisioner, type CallDevice } from "./call-device";
 import { callRoomFor, createCallWatcher, type CallMemberEvent, type CallRoom } from "./call-members";
-import { callTurnOutcome, callTurnSession, forgetCallTurns, markCallTurnCancelled } from "./call-turns";
+import { callTurnOutcome, callTurnsCancelled, callTurnSession, forgetCallTurns, markCallTurnCancelled } from "./call-turns";
 import type { CallTurnReply } from "./outbound-state";
 import { checkCallMembership, createMembershipReader, type MembershipAnswer } from "./call-membership";
 
@@ -53,9 +53,15 @@ export interface Calls {
   /** C6 `POST /internal/superdial/turns/{turn_id}/cancel`. Never throws for an unknown turn. */
   cancelTurn(turnId: string, roomId: string): Promise<void>;
   /**
+   * Did the caller cancel any of these turns? Such a turn ends silently: no notice in the room,
+   * and no reply to a call that is gone.
+   */
+  cancelledByCaller(turnIds: readonly string[]): boolean;
+  /**
    * A spoken turn ended: its reply to the call (C6 reply, `seq: 0`, `final: true`). Several turn
    * ids when queued turns were merged into one prompt: the last gets the answer, each earlier one
    * is closed `cancelled` with no text, so one answer is spoken once and nobody waits for ever.
+   * Nothing is sent for turns the caller cancelled: superdial-agent left that call.
    */
   replyToCall(reply: CallTurnReply): Promise<void>;
   /** Spoken turns whose prompt never reached the agent: each closed `error`, with no text. */
@@ -125,16 +131,23 @@ export function createCalls(deps: CallsDeps): Calls {
 
   async function close(roomId: string, turnId: string, text: string, outcome: "ok" | "cancelled" | "error") {
     const sent = await deps.agent.reply(roomId, turnId, { seq: 0, text, final: true, outcome });
-    if (!sent) log.warn("superdial-agent did not take a spoken turn's reply", { roomId, turnId, outcome });
+    // `gone` is a call that ended first; the client said so at debug.
+    if (sent === "failed") log.warn("superdial-agent did not take a spoken turn's reply", { roomId, turnId, outcome });
   }
 
   return {
     config: deps.config,
     onCallMember: (event) => watcher.handle(event),
+    cancelledByCaller: (turnIds) => callTurnsCancelled(turnIds),
 
     async replyToCall({ roomId, turnIds, text, errored }) {
       const last = turnIds.at(-1);
       if (last === undefined) return;
+      if (callTurnsCancelled(turnIds)) {
+        // The caller hung up and superdial-agent cancelled the turn as it left: nobody to answer.
+        forgetCallTurns(turnIds);
+        return;
+      }
       for (const turnId of turnIds.slice(0, -1)) await close(roomId, turnId, "", "cancelled");
       await close(roomId, last, text, callTurnOutcome(last, errored));
       forgetCallTurns(turnIds);

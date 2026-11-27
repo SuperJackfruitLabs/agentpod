@@ -53,10 +53,39 @@ describe("the superdial-agent client", () => {
   test("reply is POST /v1/calls/{room_id}/turns/{turn_id}/reply, one final message", async () => {
     const { calls, client } = agent(204);
     const body = { seq: 0, text: "It is ten past four.", final: true, outcome: "ok" } as const;
-    expect(await client.reply(ROOM, "8d3b0a52-1c51-4c2b-9b55-2f1e0b4a6f10", body)).toBe(true);
+    expect(await client.reply(ROOM, "8d3b0a52-1c51-4c2b-9b55-2f1e0b4a6f10", body)).toBe("taken");
     expect(calls[0]?.url).toBe(`http://agent.test/v1/calls/${ENCODED}/turns/8d3b0a52-1c51-4c2b-9b55-2f1e0b4a6f10/reply`);
     expect(calls[0]?.method).toBe("POST");
     expect(calls[0]?.body).toEqual(body);
+  });
+
+  test("a reply answered 404 is the call gone: tried once, and said at debug, not as a warning", async () => {
+    // superdial-agent forgets a call when its caller hangs up; a reply racing that is not a fault.
+    const warns: unknown[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => void warns.push(args);
+    const { calls, client } = agent(404);
+    try {
+      const body = { seq: 0, text: "Too late.", final: true, outcome: "ok" } as const;
+      expect(await client.reply(ROOM, "8d3b0a52-1c51-4c2b-9b55-2f1e0b4a6f10", body)).toBe("gone");
+    } finally {
+      console.warn = original;
+    }
+    expect(calls).toHaveLength(1);
+    expect(warns).toEqual([]);
+  });
+
+  test("a reply refused otherwise, or not reachable, failed", async () => {
+    const body = { seq: 0, text: "x", final: true, outcome: "ok" } as const;
+    expect(await agent(500).client.reply(ROOM, "t", body)).toBe("failed");
+    const down = createSuperdialAgentClient({
+      baseUrl: "http://agent.test",
+      token: "loopback",
+      fetch: async () => {
+        throw new Error("connection refused");
+      },
+    });
+    expect(await down.reply(ROOM, "t", body)).toBe("failed");
   });
 
   test("an error answer, or no answer at all, is false and never thrown", async () => {
