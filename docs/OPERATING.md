@@ -1638,7 +1638,14 @@ Existing rooms need it once, from the hub's directory on the host:
 ```sh
 bun run scripts/superdial-call-power-levels.ts          # dry run: lists the rooms it would change
 bun run scripts/superdial-call-power-levels.ts --apply  # writes m.room.power_levels as each room's agent
+bun run scripts/superdial-call-power-levels.ts --room '!a:hs' --room '!b:hs'          # dry run, these rooms only
+bun run scripts/superdial-call-power-levels.ts --room '!a:hs' --room '!b:hs' --apply  # writes these rooms only
 ```
+
+`--room <room_id>` is repeatable and limits the dry run and `--apply` alike to the rooms named.
+Quote room ids: they start with `!`. A named room that is not a bridge agent room is reported as
+`FAIL … not a bridge agent room` and left alone, and the run exits 1. Any other argument is
+refused (exit 2), so a mistyped option never widens a run to every room.
 
 It is idempotent, changes nothing else in the power levels, and is a real operation on the
 homeserver: run it inside an authorised session, after the dry run.
