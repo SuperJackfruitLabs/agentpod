@@ -11,9 +11,13 @@ git checkout -q --detach "$sha"
 sha=$(git rev-parse HEAD)
 
 # The console builds from its own copy of the commit, so its install never touches the hub's.
+# The copy goes on disk, not in /tmp: workbench's /tmp is RAM, and the copy with its install is
+# about 720 MB. It is removed however the build ends; one left by a killed run is swept next time.
 out=/opt/suite-staging/agentpod-console
 if [ ! -f "$out/$sha/index.html" ]; then
-  src=$(mktemp -d)
+  find /var/tmp -maxdepth 1 -name 'agentpod-console-src.*' -mmin +120 -exec rm -rf {} + 2>/dev/null || true
+  src=$(mktemp -d /var/tmp/agentpod-console-src.XXXXXX)
+  trap 'rm -rf "$src"' EXIT
   git archive "$sha" | tar -x -C "$src"
   docker run --rm -v "$src:/app" -w /app \
     -e PUBLIC_HUB_URL=https://staging-hub.agentpod.dev \
