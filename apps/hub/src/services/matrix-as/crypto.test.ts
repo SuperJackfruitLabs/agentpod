@@ -385,6 +385,53 @@ describe("narrowing a transaction to the agents in it", () => {
   });
 
   /**
+   * MSC3202 reports key counts for a device when they change, not with every to-device message.
+   * A transaction carrying a room key for the hub's device beside counts for the call device only
+   * read as "not about the hub's device", and the room key was dropped: messages sent with it
+   * could never be read.
+   */
+  test("a to-device message for the hub's device is fed even when only the call device's counts came", async () => {
+    const { fed, crypto } = fullSpy();
+    await feedAgents(
+      crypto,
+      {
+        toDevice: [BOB_HUB, BOB_CALL],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [BOB]: { SUPERDIAL: { signed_curve25519: 50 } } },
+        unusedFallbackKeys: { [BOB]: { SUPERDIAL: [] } },
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => f.userId)).toEqual([BOB]);
+    const [bob] = fed;
+    expect(bob?.tx.toDevice).toEqual([BOB_HUB]);
+    // Still never the call device's counts, and a missing list is not "the fallback key was used".
+    expect(bob?.tx.otkCounts).toEqual({});
+    expect(bob?.tx.unusedFallbackKeys).toEqual(["signed_curve25519"]);
+  });
+
+  test("a to-device message for every device of an agent (`*`) is fed with no counts at all", async () => {
+    const { fed, crypto } = fullSpy();
+    await feedAgents(
+      crypto,
+      { toDevice: [BOB_ALL], deviceLists: { changed: [], left: [] }, otkCounts: {}, unusedFallbackKeys: {} },
+      isOurs,
+    );
+    expect(fed.map((f) => [f.userId, f.tx.toDevice])).toEqual([[BOB, [BOB_ALL]]]);
+  });
+
+  test("a to-device message for somebody outside our namespace, or for the call device alone, wakes nobody", async () => {
+    const { fed, crypto } = fullSpy();
+    const human = { ...BOB_HUB, to_user_id: "@rakesh:id.agentpod.dev" };
+    await feedAgents(
+      crypto,
+      { toDevice: [human, BOB_CALL, UNROUTED], deviceLists: { changed: [], left: [] }, otkCounts: {}, unusedFallbackKeys: {} },
+      isOurs,
+    );
+    expect(fed).toEqual([]);
+  });
+
+  /**
    * One agent's device id that cannot be read (its store unreadable, its login refused) must not
    * cost every other agent its share of the transaction: the route swallows the throw and the
    * homeserver never sends those room keys again.

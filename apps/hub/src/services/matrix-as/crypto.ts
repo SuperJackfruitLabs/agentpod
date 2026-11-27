@@ -752,6 +752,19 @@ export async function feedAgents(
       agents.add(user);
     }
   }
+  /**
+   * And every agent a to-device message is addressed to, at its own device or `*`, counts or no
+   * counts: MSC3202 reports a device's counts when they change, not with every message. Gated on
+   * the counts alone, a room key for the hub's device that came beside the call device's counts
+   * was dropped, and the messages sent with it could never be read. Such an agent is fed no other
+   * device's counts below, and a missing fallback list stays "unreported".
+   */
+  for (const event of tx.toDevice) {
+    const toUser = recipientOf(event);
+    if (toUser === null || agents.has(toUser) || !isOurs(toUser)) continue;
+    const device = await ownDevice(toUser);
+    if (device !== null && addressedTo(event, toUser, device)) agents.add(toUser);
+  }
   for (const user of tx.deviceLists.changed) if (isOurs(user)) agents.add(user);
 
   /**
@@ -812,6 +825,13 @@ function lastFallbackKeys(crypto: AgentCrypto): Map<string, string[]> {
     fallbackMemory.set(crypto, memory);
   }
   return memory;
+}
+
+/** The user a pushed to-device event is routed to (MSC2409 `to_user_id`), or null. */
+function recipientOf(event: unknown): string | null {
+  if (event === null || typeof event !== "object") return null;
+  const toUser: unknown = Reflect.get(event, "to_user_id");
+  return typeof toUser === "string" ? toUser : null;
 }
 
 /**
