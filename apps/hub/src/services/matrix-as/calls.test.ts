@@ -30,6 +30,7 @@ function harness(
   opts: {
     voice?: () => Promise<string>;
     device?: () => Promise<{ deviceId: string; accessToken: string }>;
+    join?: () => Promise<boolean>;
     reply?: ReplyResult;
     /** Each known session's room. */
     sessions?: Record<string, string>;
@@ -44,7 +45,10 @@ function harness(
   /** Per session, the spoken turns its running prompt answers (as the outbound path records it). */
   const running = new Map<string, string[]>();
   const agent: SuperdialAgentClient = {
-    joinCall: async (roomId, body) => (joins.push({ roomId, body }), true),
+    joinCall: async (roomId, body) => {
+      joins.push({ roomId, body });
+      return opts.join ? opts.join() : true;
+    },
     leaveCall: async (roomId) => (leaves.push(roomId), true),
     reply: async (roomId, turnId, body) => (replies.push({ roomId, turnId, body }), opts.reply ?? "taken"),
   };
@@ -76,6 +80,7 @@ describe("joining and leaving a call", () => {
   test("a person joining asks superdial-agent to join as the agent's call device", async () => {
     const { calls, joins } = harness();
     await calls.onCallMember(member(JOINED));
+    await calls.settled();
     expect(joins).toEqual([
       {
         roomId: ROOM,
@@ -97,6 +102,7 @@ describe("joining and leaving a call", () => {
       },
     });
     await calls.onCallMember(member(JOINED));
+    await calls.settled();
     expect(joins[0]?.body.voice).toBe("af_heart");
   });
 
@@ -107,6 +113,7 @@ describe("joining and leaving a call", () => {
       },
     });
     await calls.onCallMember(member(JOINED));
+    await calls.settled();
     expect(joins).toEqual([]);
   });
 
@@ -114,12 +121,53 @@ describe("joining and leaving a call", () => {
     const { calls, leaves } = harness();
     await calls.onCallMember(member(JOINED));
     await calls.onCallMember(member({}));
+    await calls.settled();
     expect(leaves).toEqual([ROOM]);
   });
 
   test("a leave after a restart forgot the join still leaves (idempotent at superdial-agent)", async () => {
     const { calls, leaves } = harness();
     await calls.onCallMember(member({}));
+    await calls.settled();
+    expect(leaves).toEqual([ROOM]);
+  });
+
+  /**
+   * The appservice transaction that carries a person's call membership waits for its handler.
+   * Awaited there, a superdial-agent (or a homeserver login) that never answered held every later
+   * transaction: every message to every agent on this hub.
+   */
+  test("a superdial-agent that never answers does not hold the transaction", async () => {
+    const { calls, joins } = harness({ join: () => new Promise<boolean>(() => {}) });
+    const outcome = await Promise.race([
+      calls.onCallMember(member(JOINED)).then(() => "returned"),
+      new Promise((resolve) => setTimeout(() => resolve("held"), 200)),
+    ]);
+    expect(outcome).toBe("returned");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(joins).toHaveLength(1);
+  });
+
+  test("a call device that never mints does not hold the transaction", async () => {
+    const { calls } = harness({ device: () => new Promise(() => {}) });
+    const outcome = await Promise.race([
+      calls.onCallMember(member(JOINED)).then(() => "returned"),
+      new Promise((resolve) => setTimeout(() => resolve("held"), 200)),
+    ]);
+    expect(outcome).toBe("returned");
+  });
+
+  test("a room's join and leave still reach superdial-agent in order", async () => {
+    // Not waited for, they are queued per room: a leave must not overtake the join it ends.
+    let release: ((joined: boolean) => void) | undefined;
+    const { calls, joins, leaves } = harness({ join: () => new Promise<boolean>((resolve) => (release = resolve)) });
+    await calls.onCallMember(member(JOINED));
+    await calls.onCallMember(member({}));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(joins).toHaveLength(1);
+    expect(leaves).toEqual([]);
+    release?.(true);
+    await calls.settled();
     expect(leaves).toEqual([ROOM]);
   });
 });

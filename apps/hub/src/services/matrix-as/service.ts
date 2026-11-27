@@ -948,6 +948,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
 
     async onEvent(event) {
       // A call membership is state, never a message: `handleRoomMessage` would drop it unread.
+      // Only queued here: the join it causes is not waited for, so it never holds the transaction.
       if (event.type === CALL_MEMBER_TYPE) {
         await calls?.onCallMember(event);
         return;

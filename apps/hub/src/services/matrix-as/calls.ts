@@ -53,8 +53,15 @@ export interface CallsDeps {
 
 export interface Calls {
   config: SuperdialConfig;
-  /** An `org.matrix.msc3401.call.member` event from a transaction. */
+  /**
+   * An `org.matrix.msc3401.call.member` event from a transaction. Queued behind the room's earlier
+   * call memberships and NOT waited for: the join or leave it causes talks to superdial-agent and
+   * may mint a device, and the appservice transaction carrying it holds every later one while its
+   * handler runs. Resolves once queued; never rejects.
+   */
   onCallMember(event: CallMemberEvent): Promise<void>;
+  /** Every call membership queued so far has been handled (its join or leave ran or gave up). */
+  settled(): Promise<void>;
   /** C6 `POST /internal/superdial/turns/{turn_id}/cancel`. Never throws for an unknown turn. */
   cancelTurn(turnId: string, roomId: string): Promise<void>;
   /**
@@ -135,6 +142,27 @@ export function createCalls(deps: CallsDeps): Calls {
     },
   });
 
+  /**
+   * Per room, the call memberships still being handled, in order: a leave must not reach
+   * superdial-agent before the join it ends.
+   */
+  const queues = new Map<string, Promise<void>>();
+  function enqueue(event: CallMemberEvent): void {
+    const key = event.room_id ?? "";
+    const next = (queues.get(key) ?? Promise.resolve())
+      .then(() => watcher.handle(event))
+      .catch((err: unknown) =>
+        log.error("a call membership could not be handled", {
+          roomId: event.room_id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    queues.set(key, next);
+    void next.finally(() => {
+      if (queues.get(key) === next) queues.delete(key);
+    });
+  }
+
   async function close(roomId: string, turnId: string, text: string, outcome: "ok" | "cancelled" | "error") {
     const sent = await deps.agent.reply(roomId, turnId, { seq: 0, text, final: true, outcome });
     // `gone` is a call that ended first; the client said so at debug.
@@ -143,7 +171,10 @@ export function createCalls(deps: CallsDeps): Calls {
 
   return {
     config: deps.config,
-    onCallMember: (event) => watcher.handle(event),
+    onCallMember: async (event) => enqueue(event),
+    async settled() {
+      while (queues.size > 0) await Promise.all(queues.values());
+    },
     cancelledByCaller: (roomId, turnIds) => callTurnsCancelled(roomId, turnIds),
 
     async replyToCall({ roomId, turnIds, text, errored }) {

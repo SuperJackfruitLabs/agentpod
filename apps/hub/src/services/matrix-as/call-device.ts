@@ -28,6 +28,9 @@ import { isRecord } from "./outbound-payloads";
 
 const log = createLogger("matrix-calls");
 
+/** How long the call device's login may take before it is given up on (and tried again next call). */
+export const CALL_DEVICE_LOGIN_TIMEOUT_MS = 15_000;
+
 export interface CallDevice {
   deviceId: string;
   accessToken: string;
@@ -66,9 +69,12 @@ export function createCallDeviceProvisioner(deps: {
   asToken: string;
   store?: CallDeviceStore;
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** Defaults to `CALL_DEVICE_LOGIN_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }) {
   const store = deps.store ?? dbCallDeviceStore;
   const doFetch = deps.fetch ?? fetch;
+  const timeoutMs = deps.timeoutMs ?? CALL_DEVICE_LOGIN_TIMEOUT_MS;
   const cache = new Map<string, Promise<CallDevice>>();
 
   async function mint(agentUserId: string): Promise<CallDevice> {
@@ -85,6 +91,7 @@ export function createCallDeviceProvisioner(deps: {
         device_id: CALL_DEVICE_ID,
         initial_device_display_name: "superdial call",
       }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const answer: unknown = await res.json().catch(() => ({}));
     const field = (key: string): string | undefined => {

@@ -8,6 +8,16 @@ import { createSuperdialAgentClient } from "./call-agent-client";
  */
 
 const ROOM = "!r:s";
+/** What a request answered, or "still waiting" a second later. */
+const bound = (p: Promise<unknown>) =>
+  Promise.race([p, new Promise((resolve) => setTimeout(() => resolve("still waiting"), 1_000))]);
+const JOIN = {
+  agent_user_id: "@agent_x:s",
+  homeserver_url: "http://hs.test",
+  device: { device_id: "SUPERDIAL", access_token: "syt_call" },
+  voice: "af_heart",
+  stt_language: null,
+};
 const ENCODED = "%21r%3As";
 
 function agent(status = 204) {
@@ -98,5 +108,36 @@ describe("the superdial-agent client", () => {
       },
     });
     expect(await down.leaveCall(ROOM)).toBe(false);
+  });
+
+  test("a superdial-agent that never answers is given up on within the bound", async () => {
+    // Every caller is on a path that must not wait for ever: a turn's end, a call's join.
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const hung = createSuperdialAgentClient({
+      baseUrl: "http://agent.test",
+      token: "loopback",
+      timeoutMs: 20,
+      fetch: (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signals.push(init?.signal);
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    });
+    const body = { seq: 0, text: "x", final: true, outcome: "ok" } as const;
+    expect(await bound(hung.joinCall(ROOM, JOIN))).toBe(false);
+    expect(await bound(hung.leaveCall(ROOM))).toBe(false);
+    expect(await bound(hung.reply(ROOM, "t", body))).toBe("failed");
+    expect(signals).toHaveLength(3);
+  });
+
+  test("every request carries a timeout by default", async () => {
+    const seen: Array<AbortSignal | null | undefined> = [];
+    const client = createSuperdialAgentClient({
+      baseUrl: "http://agent.test",
+      token: "loopback",
+      fetch: async (_url, init) => (seen.push(init?.signal), new Response(null, { status: 204 })),
+    });
+    await client.joinCall(ROOM, JOIN);
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
   });
 });

@@ -3,12 +3,17 @@
  *
  * superdial-agent serves these over loopback or the Docker network, never publicly, behind the
  * shared `SUPERDIAL_AGENT_TOKEN`. Each answers "done" or "not done"; none throws, because every
- * caller is on a path (an appservice transaction, a turn ending) that must not fail with it.
+ * caller is on a path (a call's join, a turn ending) that must not fail with it. None waits for
+ * ever either: a superdial-agent that takes the connection and never answers is given up on after
+ * `SUPERDIAL_AGENT_TIMEOUT_MS`, and the request reported as failed.
  */
 
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-calls");
+
+/** How long one request to superdial-agent may take. It is on loopback: longer is not slow, it is stuck. */
+export const SUPERDIAL_AGENT_TIMEOUT_MS = 10_000;
 
 /** `PUT /v1/calls/{room_id}`: join, or stay joined. */
 export interface CallJoin {
@@ -58,8 +63,11 @@ export function createSuperdialAgentClient(deps: {
   baseUrl: string;
   token: string;
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** Defaults to `SUPERDIAL_AGENT_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }): SuperdialAgentClient {
   const doFetch = deps.fetch ?? fetch;
+  const timeoutMs = deps.timeoutMs ?? SUPERDIAL_AGENT_TIMEOUT_MS;
   const base = deps.baseUrl.replace(/\/+$/, "");
 
   async function send(what: string, method: string, path: string, body?: unknown): Promise<ReplyResult> {
@@ -71,6 +79,7 @@ export function createSuperdialAgentClient(deps: {
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (res.ok) return "taken";
       if (res.status === 404 && what === "reply") {

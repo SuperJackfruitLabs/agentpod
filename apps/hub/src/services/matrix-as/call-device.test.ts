@@ -93,4 +93,31 @@ describe("the agent's call device", () => {
       expect(store.rows.size).toBe(0);
     }
   });
+
+  test("a homeserver that never answers the login is given up on within the bound", async () => {
+    // The join waits on this; without a bound one stuck login held the call's queue for ever.
+    const store = memoryStore();
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const deviceFor = createCallDeviceProvisioner({
+      homeserverUrl: HS,
+      asToken: "as_token",
+      store,
+      timeoutMs: 20,
+      fetch: (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signals.push(init?.signal);
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    });
+    const outcome = await Promise.race([
+      deviceFor(AGENT).then(
+        () => "minted",
+        () => "gave up",
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("still waiting"), 1_000)),
+    ]);
+    expect(outcome).toBe("gave up");
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(store.rows.size).toBe(0);
+  });
 });
