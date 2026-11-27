@@ -73,7 +73,7 @@ func editableHermes(t *testing.T, editable bool) (checkout, entry string) {
 	checkout = t.TempDir()
 	git := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)...)
+		cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -127,7 +127,7 @@ func TestHermesVersionReadsTheReleaseTagOfAnEditableCheckout(t *testing.T) {
 func TestHermesVersionKeepsThePlaceholderOffAReleaseTag(t *testing.T) {
 	t.Run("commit past the tag", func(t *testing.T) {
 		checkout, entry := editableHermes(t, true)
-		cmd := exec.Command("git", "-C", checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "later")
+		cmd := exec.CommandContext(context.Background(), "git", "-C", checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "later")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
