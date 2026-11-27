@@ -238,6 +238,11 @@ export interface InboundDeps {
    * somebody else's — does not claim this message's marks and voice flag.
    */
   forgetTrigger?(sessionId: string, eventId: string): void;
+  /**
+   * Spoken turns (superdial) about to be prompted into this session, noted in their room: a
+   * cancel names its room, and a turn id is only its own room's.
+   */
+  noteCallTurns?(roomId: string, sessionId: string, turnIds: string[]): void;
   /** Spoken turns (superdial) whose prompt could not reach the agent: the call is told so. */
   unansweredCallTurns?(roomId: string, turnIds: string[]): void;
 }
@@ -931,6 +936,7 @@ async function dispatchTurn(
       deps.noteTrigger(sessionId, turn.eventId, { voice: turn.voice === true, ...callTurns });
       noted = { sessionId, eventId: turn.eventId };
     }
+    if (turn.callTurns) deps.noteCallTurns?.(room.roomId, sessionId, turn.callTurns);
 
     // The prompt as built above, unchanged here. The owner again, not the principal:
     // `promptSession` resolves the live session with `requireLive(userId, sessionId)`, and a

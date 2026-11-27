@@ -1380,13 +1380,16 @@ function spoken(marker: Record<string, unknown>) {
 
 function spokenDeps() {
   const notes: Array<{ eventId: string; opts: unknown }> = [];
+  const callTurns: Array<{ roomId: string; turnIds: string[] }> = [];
   const unanswered: Array<{ roomId: string; turnIds: string[] }> = [];
   return {
     notes,
+    callTurns,
     unanswered,
     deps: {
       ...deps(),
       noteTrigger: (_sessionId: string, eventId: string, opts?: unknown) => void notes.push({ eventId, opts }),
+      noteCallTurns: (roomId: string, _sessionId: string, turnIds: string[]) => void callTurns.push({ roomId, turnIds }),
       unansweredCallTurns: (roomId: string, turnIds: string[]) => void unanswered.push({ roomId, turnIds }),
     },
   };
@@ -1402,6 +1405,23 @@ describe("a spoken turn", () => {
     ]);
     expect(notes).toHaveLength(1);
     expect(notes[0]?.opts).toEqual({ voice: false, callTurns: [SPOKEN_TURN] });
+  });
+
+  test("its turn id is noted in the room it was spoken in", async () => {
+    // A cancel names its room, and a turn id is only its own room's.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, callTurns } = spokenDeps();
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID, audio_ms: 2310 }), d);
+    expect(callTurns).toEqual([{ roomId: ROOM, turnIds: [SPOKEN_TURN] }]);
+  });
+
+  test("a marker whose turn id is not a lower-case UUIDv4 is an ordinary message", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notes, callTurns } = spokenDeps();
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN.toUpperCase(), agent_user_id: SPOKEN_AGENT_MXID }), d);
+    expect(prompts.map((p) => p.text)).toEqual(["what time is it"]);
+    expect(notes[0]?.opts).toEqual({ voice: false });
+    expect(callTurns).toEqual([]);
   });
 
   test("a marker for another agent is an ordinary message: no prefix, no turn id", async () => {

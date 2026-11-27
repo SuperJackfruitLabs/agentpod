@@ -176,7 +176,7 @@ async function onTurnEnd(ctx: RoomContext, event: AcpEvent): Promise<void> {
   // waiting for an answer and nothing failed, so the room is told nothing: an error the cancel
   // caused ("stopped the turn") is dropped, there is no silence notice, and the 👀 comes off
   // with no ✅ or ❌. Whatever the agent already said stays in the room.
-  const cancelledByCaller = state.callTurns.length > 0 && ctx.deps.callTurnCancelled?.(state.callTurns) === true;
+  const cancelledByCaller = state.callTurns.length > 0 && ctx.deps.callTurnCancelled?.(ctx.roomId, state.callTurns) === true;
   if (cancelledByCaller) {
     state.pendingError = null;
     if (wasTurn) noteTurnFinished(ctx, false);

@@ -103,7 +103,7 @@ export interface OutboundDeps {
    * turn ends silently in the room: no error, no "ended without a reply" notice, no ✅ or ❌ —
    * only the 👀 taken off. Optional: without it every turn ends as before.
    */
-  callTurnCancelled?: (turnIds: readonly string[]) => boolean;
+  callTurnCancelled?: (roomId: string, turnIds: readonly string[]) => boolean;
 }
 
 /** A spoken turn's reply, for the call: every turn id it answers (several when merged). */

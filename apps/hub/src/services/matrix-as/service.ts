@@ -788,14 +788,15 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         ...(calls
           ? {
               callReply: (reply: CallTurnReply) => calls.replyToCall(reply),
-              callTurnCancelled: (turnIds: readonly string[]) => calls.cancelledByCaller(turnIds),
+              callTurnCancelled: (inRoom: string, turnIds: readonly string[]) => calls.cancelledByCaller(inRoom, turnIds),
             }
           : {}),
       }),
-    noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }) => {
-      noteTurnTrigger(sessionId, eventId, opts);
-      if (calls && opts?.callTurns) noteCallTurns(sessionId, opts.callTurns);
-    },
+    noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }) =>
+      noteTurnTrigger(sessionId, eventId, opts),
+    ...(calls
+      ? { noteCallTurns: (roomId: string, sessionId: string, turnIds: string[]) => noteCallTurns(roomId, sessionId, turnIds) }
+      : {}),
     forgetTrigger: forgetTurnTrigger,
     unansweredCallTurns: (roomId: string, turnIds: string[]) => void calls?.replyUnanswered(roomId, turnIds),
     displayNameFor: (principalId: string) => principalLabel(principalId),

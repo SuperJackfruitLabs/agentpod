@@ -29,6 +29,8 @@ function harness(
     voice?: () => Promise<string>;
     device?: () => Promise<{ deviceId: string; accessToken: string }>;
     reply?: ReplyResult;
+    /** Each known session's room. */
+    sessions?: Record<string, string>;
   } = {},
 ) {
   const joins: Array<{ roomId: string; body: CallJoin }> = [];
@@ -48,7 +50,10 @@ function harness(
     callDeviceFor: opts.device ?? (async () => ({ deviceId: "SUPERDIAL", accessToken: "syt_call" })),
     voiceFor: opts.voice ?? (async () => "bf_emma"),
     roomFor: async (roomId) => (roomId === ROOM ? ROOM_ROW : null),
-    sessionFor: async (sessionId) => (sessionId === "acps_1" ? { userId: "user_owner", roomId: ROOM } : null),
+    sessionFor: async (sessionId) => {
+      const roomId = (opts.sessions ?? { acps_1: ROOM })[sessionId];
+      return roomId ? { userId: "user_owner", roomId } : null;
+    },
     cancel: async (userId, sessionId) => void cancels.push({ userId, sessionId }),
     membershipOf: async () => "join",
   });
@@ -112,24 +117,40 @@ describe("joining and leaving a call", () => {
 describe("a cancel from superdial-agent", () => {
   test("stops the turn it names, as the session's owner", async () => {
     const { calls, cancels } = harness();
-    noteCallTurns("acps_1", [TURN]);
+    noteCallTurns(ROOM, "acps_1", [TURN]);
     await calls.cancelTurn(TURN, ROOM);
     expect(cancels).toEqual([{ userId: "user_owner", sessionId: "acps_1" }]);
   });
 
   test("a turn in another room, or one the hub does not know, stops nothing", async () => {
     const { calls, cancels } = harness();
-    noteCallTurns("acps_1", [TURN]);
+    noteCallTurns(ROOM, "acps_1", [TURN]);
     await calls.cancelTurn(TURN, "!elsewhere:id.agentpod.dev");
     await calls.cancelTurn("6f1b2c3d-0000-4000-8000-000000000000", ROOM);
     expect(cancels).toEqual([]);
+  });
+
+  test("a turn id reused in another room neither takes over nor cancels the first room's turn", async () => {
+    // Another room's member copies a live turn id into a marker there. Keyed by turn id alone,
+    // the copy re-pointed the id at the second room's session: the real caller's hang-up then
+    // named a room its turn was "not in", and stopped nothing.
+    const OTHER = "!other:id.agentpod.dev";
+    const { calls, cancels } = harness({
+      sessions: { acps_1: ROOM, acps_2: OTHER },
+    });
+    noteCallTurns(ROOM, "acps_1", [TURN]);
+    noteCallTurns(OTHER, "acps_2", [TURN]);
+    await calls.cancelTurn(TURN, ROOM);
+    expect(cancels).toEqual([{ userId: "user_owner", sessionId: "acps_1" }]);
+    expect(calls.cancelledByCaller(ROOM, [TURN])).toBe(true);
+    expect(calls.cancelledByCaller(OTHER, [TURN])).toBe(false);
   });
 });
 
 describe("a spoken turn's reply", () => {
   test("goes to the call once, final, with the whole text", async () => {
     const { calls, replies } = harness();
-    noteCallTurns("acps_1", [TURN]);
+    noteCallTurns(ROOM, "acps_1", [TURN]);
     await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "It is ten past four.", errored: false });
     expect(replies).toEqual([
       { roomId: ROOM, turnId: TURN, body: { seq: 0, text: "It is ten past four.", final: true, outcome: "ok" } },
@@ -140,7 +161,7 @@ describe("a spoken turn's reply", () => {
     // The cancel came from superdial-agent as it left the call: there is no call to answer, and
     // E1 (2026-11-27) saw the reply answered 404.
     const { calls, replies } = harness();
-    noteCallTurns("acps_1", ["t-cancelled", "t-error"]);
+    noteCallTurns(ROOM, "acps_1", ["t-cancelled", "t-error"]);
     await calls.cancelTurn("t-cancelled", ROOM);
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-cancelled"], text: "Partial", errored: false });
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-error"], text: "", errored: true });
@@ -149,12 +170,12 @@ describe("a spoken turn's reply", () => {
 
   test("whether the caller cancelled a turn is known until its end is handled, then forgotten", async () => {
     const { calls } = harness();
-    noteCallTurns("acps_1", ["t-1", "t-2"]);
-    expect(calls.cancelledByCaller(["t-1", "t-2"])).toBe(false);
+    noteCallTurns(ROOM, "acps_1", ["t-1", "t-2"]);
+    expect(calls.cancelledByCaller(ROOM, ["t-1", "t-2"])).toBe(false);
     await calls.cancelTurn("t-2", ROOM);
-    expect(calls.cancelledByCaller(["t-1", "t-2"])).toBe(true);
+    expect(calls.cancelledByCaller(ROOM, ["t-1", "t-2"])).toBe(true);
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-1", "t-2"], text: "", errored: false });
-    expect(calls.cancelledByCaller(["t-1", "t-2"])).toBe(false);
+    expect(calls.cancelledByCaller(ROOM, ["t-1", "t-2"])).toBe(false);
   });
 
   test("a reply superdial-agent answers 404 (the call is gone) is not warned about", async () => {
@@ -163,7 +184,7 @@ describe("a spoken turn's reply", () => {
     console.warn = (...args: unknown[]) => void warns.push(args);
     try {
       const { calls } = harness({ reply: "gone" });
-      noteCallTurns("acps_1", [TURN]);
+      noteCallTurns(ROOM, "acps_1", [TURN]);
       await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "Late.", errored: false });
     } finally {
       console.warn = original;
@@ -174,7 +195,7 @@ describe("a spoken turn's reply", () => {
   test("merged spoken turns: the last is answered, the earlier ones are closed as cancelled with no text", async () => {
     // One answer, spoken once. Each earlier turn still hears back, or superdial-agent waits for ever.
     const { calls, replies } = harness();
-    noteCallTurns("acps_1", ["t-1", "t-2"]);
+    noteCallTurns(ROOM, "acps_1", ["t-1", "t-2"]);
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-1", "t-2"], text: "Both, briefly.", errored: false });
     expect(replies).toEqual([
       { roomId: ROOM, turnId: "t-1", body: { seq: 0, text: "", final: true, outcome: "cancelled" } },
@@ -190,7 +211,7 @@ describe("a spoken turn's reply", () => {
 
   test("once answered, a turn can no longer be cancelled", async () => {
     const { calls, cancels } = harness();
-    noteCallTurns("acps_1", [TURN]);
+    noteCallTurns(ROOM, "acps_1", [TURN]);
     await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "Done.", errored: false });
     await calls.cancelTurn(TURN, ROOM);
     expect(cancels).toEqual([]);

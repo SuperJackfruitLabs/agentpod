@@ -2135,7 +2135,11 @@ describe("a spoken turn's end hands its text to the call", () => {
     let cancelled: string[] = [];
     const cancelledDeps = (turnIds: string[]) => {
       cancelled = turnIds;
-      return { ...callDeps(), callTurnCancelled: (ids: readonly string[]) => ids.some((id) => cancelled.includes(id)) };
+      return {
+        ...callDeps(),
+        callTurnCancelled: (roomId: string, ids: readonly string[]) =>
+          roomId === ROOM && ids.some((id) => cancelled.includes(id)),
+      };
     };
 
     test("ends with no notice in the room and no failure mark", async () => {

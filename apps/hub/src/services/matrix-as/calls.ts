@@ -56,7 +56,7 @@ export interface Calls {
    * Did the caller cancel any of these turns? Such a turn ends silently: no notice in the room,
    * and no reply to a call that is gone.
    */
-  cancelledByCaller(turnIds: readonly string[]): boolean;
+  cancelledByCaller(roomId: string, turnIds: readonly string[]): boolean;
   /**
    * A spoken turn ended: its reply to the call (C6 reply, `seq: 0`, `final: true`). Several turn
    * ids when queued turns were merged into one prompt: the last gets the answer, each earlier one
@@ -138,19 +138,19 @@ export function createCalls(deps: CallsDeps): Calls {
   return {
     config: deps.config,
     onCallMember: (event) => watcher.handle(event),
-    cancelledByCaller: (turnIds) => callTurnsCancelled(turnIds),
+    cancelledByCaller: (roomId, turnIds) => callTurnsCancelled(roomId, turnIds),
 
     async replyToCall({ roomId, turnIds, text, errored }) {
       const last = turnIds.at(-1);
       if (last === undefined) return;
-      if (callTurnsCancelled(turnIds)) {
+      if (callTurnsCancelled(roomId, turnIds)) {
         // The caller hung up and superdial-agent cancelled the turn as it left: nobody to answer.
-        forgetCallTurns(turnIds);
+        forgetCallTurns(roomId, turnIds);
         return;
       }
       for (const turnId of turnIds.slice(0, -1)) await close(roomId, turnId, "", "cancelled");
-      await close(roomId, last, text, callTurnOutcome(last, errored));
-      forgetCallTurns(turnIds);
+      await close(roomId, last, text, callTurnOutcome(roomId, last, errored));
+      forgetCallTurns(roomId, turnIds);
     },
 
     membership: (input) =>
@@ -162,11 +162,12 @@ export function createCalls(deps: CallsDeps): Calls {
 
     async replyUnanswered(roomId, turnIds) {
       for (const turnId of turnIds) await close(roomId, turnId, "", "error");
-      forgetCallTurns(turnIds);
+      forgetCallTurns(roomId, turnIds);
     },
 
     async cancelTurn(turnId, roomId) {
-      const sessionId = callTurnSession(turnId);
+      // Looked up in the room the cancel names: a turn id is only its own room's.
+      const sessionId = callTurnSession(roomId, turnId);
       if (!sessionId) {
         log.info("a cancel for a spoken turn the hub is not running", { turnId, roomId });
         return;
@@ -178,7 +179,7 @@ export function createCalls(deps: CallsDeps): Calls {
         log.warn("a cancel named a room its turn is not in; nothing was stopped", { turnId, roomId });
         return;
       }
-      markCallTurnCancelled(turnId);
+      markCallTurnCancelled(roomId, turnId);
       try {
         await deps.cancel(session.userId, sessionId);
         log.info("cancelled a spoken turn at the caller's hang-up", { turnId, roomId, sessionId });
