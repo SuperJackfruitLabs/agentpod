@@ -12,6 +12,7 @@
  */
 
 import { SPOKEN_KEY, SPOKEN_PROMPT_PREFIX } from "./call-config";
+import { isRecord } from "./outbound-payloads";
 
 /**
  * The spoken turn a message carries (C3), or null for an ordinary message.
@@ -23,8 +24,8 @@ import { SPOKEN_KEY, SPOKEN_PROMPT_PREFIX } from "./call-config";
 export function spokenTurn(content: Record<string, unknown> | undefined, agentUserId: string): { turnId: string } | null {
   if (!content || content.msgtype !== "m.text") return null;
   const marker = content[SPOKEN_KEY];
-  if (!marker || typeof marker !== "object") return null;
-  const { turn_id: turnId, agent_user_id: agent } = marker as Record<string, unknown>;
+  if (!isRecord(marker)) return null;
+  const { turn_id: turnId, agent_user_id: agent } = marker;
   if (typeof turnId !== "string" || turnId === "" || agent !== agentUserId) return null;
   return { turnId };
 }

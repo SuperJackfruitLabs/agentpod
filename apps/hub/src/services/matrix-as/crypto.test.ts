@@ -215,7 +215,7 @@ describe("narrowing a transaction to the agents in it", () => {
         loadedAgents: () => [],
         // The hub's own device for every agent in these fixtures.
         deviceIdFor: async () => "AGENTPOD",
-        close: () => {},
+        close: async () => {},
       },
     };
   }
@@ -227,7 +227,7 @@ describe("narrowing a transaction to the agents in it", () => {
     // quietly unreachable.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [], left: [] },
@@ -251,7 +251,7 @@ describe("narrowing a transaction to the agents in it", () => {
     // device that is gone, and the recipient can read none of it.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [ALICE], left: [] },
@@ -269,7 +269,7 @@ describe("narrowing a transaction to the agents in it", () => {
   test("users outside our namespace are not fed", async () => {
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: ["@a-human:id.agentpod.dev"], left: [] },
@@ -299,7 +299,7 @@ describe("narrowing a transaction to the agents in it", () => {
           ? { AGENTPOD: [] as string[], SUPERDIAL: ["signed_curve25519"] }
           : { SUPERDIAL: ["signed_curve25519"], AGENTPOD: [] as string[] };
       await feedAgents(
-        crypto as unknown as AgentCrypto,
+        crypto,
         {
           toDevice: [],
           deviceLists: { changed: [], left: [] },
@@ -317,7 +317,7 @@ describe("narrowing a transaction to the agents in it", () => {
     // would read as "the fallback key was used" and rotate it for nothing.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as unknown as AgentCrypto,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [], left: [] },
@@ -401,7 +401,7 @@ describe("narrowing a transaction to the agents in it", () => {
   test("fallback key types are read from the hub's own device", async () => {
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [], left: [] },

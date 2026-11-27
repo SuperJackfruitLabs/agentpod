@@ -24,6 +24,7 @@ import { superdialCallDevices } from "../../db/schema/superdial";
 import { decrypt, encrypt } from "../../utils/encryption";
 import { createLogger } from "../../utils/logger";
 import { CALL_DEVICE_ID } from "./call-config";
+import { isRecord } from "./outbound-payloads";
 
 const log = createLogger("matrix-calls");
 
@@ -64,7 +65,7 @@ export function createCallDeviceProvisioner(deps: {
   homeserverUrl: string;
   asToken: string;
   store?: CallDeviceStore;
-  fetch?: typeof globalThis.fetch;
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
 }) {
   const store = deps.store ?? dbCallDeviceStore;
   const doFetch = deps.fetch ?? fetch;
@@ -75,7 +76,7 @@ export function createCallDeviceProvisioner(deps: {
     if (kept) return kept;
 
     const localpart = agentUserId.slice(1).split(":")[0] ?? agentUserId;
-    const res = await doFetch(new URL("/_matrix/client/v3/login", deps.homeserverUrl), {
+    const res = await doFetch(new URL("/_matrix/client/v3/login", deps.homeserverUrl).toString(), {
       method: "POST",
       headers: { Authorization: `Bearer ${deps.asToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -85,11 +86,12 @@ export function createCallDeviceProvisioner(deps: {
         initial_device_display_name: "superdial call",
       }),
     });
-    const body = (await res.json().catch(() => ({}))) as {
-      device_id?: string;
-      access_token?: string;
-      errcode?: string;
+    const answer: unknown = await res.json().catch(() => ({}));
+    const field = (key: string): string | undefined => {
+      const v = isRecord(answer) ? answer[key] : undefined;
+      return typeof v === "string" ? v : undefined;
     };
+    const body = { device_id: field("device_id"), access_token: field("access_token"), errcode: field("errcode") };
     if (!res.ok) {
       throw new Error(`could not mint a call device for ${agentUserId}: ${res.status} ${body.errcode ?? ""}`.trim());
     }

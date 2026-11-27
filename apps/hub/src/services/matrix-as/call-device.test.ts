@@ -24,7 +24,7 @@ function memoryStore(): CallDeviceStore & { rows: Map<string, { deviceId: string
 
 function homeserver(answer: (n: number) => { status: number; body: Record<string, unknown> }) {
   const calls: Array<{ url: string; method: string; body: unknown; auth: string | null }> = [];
-  const fetch = (async (url: string | URL, init?: RequestInit) => {
+  const fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
     calls.push({
       url: String(url),
       method: init?.method ?? "GET",
@@ -33,7 +33,7 @@ function homeserver(answer: (n: number) => { status: number; body: Record<string
     });
     const { status, body } = answer(calls.length);
     return new Response(JSON.stringify(body), { status });
-  }) as unknown as typeof globalThis.fetch;
+  };
   return { calls, fetch };
 }
 

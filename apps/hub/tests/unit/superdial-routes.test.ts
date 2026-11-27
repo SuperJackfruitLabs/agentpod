@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createSuperdialRoutes } from "../../src/routes/superdial";
+import type { Calls } from "../../src/services/matrix-as";
 
 const TURN = "8d3b0a52-1c51-4c2b-9b55-2f1e0b4a6f10";
 const ROOM = "!call:id.agentpod.dev";
@@ -71,7 +72,7 @@ describe("POST /internal/superdial/turns/{turn_id}/cancel", () => {
   });
 });
 
-function membershipApp(answer: (input: { userId: string; roomId: string }) => Promise<unknown>, on = true) {
+function membershipApp(answer: Calls["membership"], on = true) {
   const asked: Array<{ userId: string; roomId: string }> = [];
   const routes = createSuperdialRoutes({
     agentToken: "loopback-secret",
@@ -81,7 +82,7 @@ function membershipApp(answer: (input: { userId: string; roomId: string }) => Pr
           cancelTurn: async () => {},
           membership: async (input) => {
             asked.push(input);
-            return answer(input) as never;
+            return answer(input);
           },
         }
       : null,
@@ -97,7 +98,7 @@ function ask(a: Hono, body: unknown, auth: string | null = "Bearer membership-se
   });
 }
 
-const ALLOWED = { allowed: true, agent_user_id: "@agent_ada:id.agentpod.dev", station_id: "station_ada" };
+const ALLOWED = { allowed: true as const, agent_user_id: "@agent_ada:id.agentpod.dev", station_id: "station_ada" };
 
 
 describe("POST /internal/superdial/membership", () => {

@@ -12,7 +12,7 @@ const ENCODED = "%21r%3As";
 
 function agent(status = 204) {
   const calls: Array<{ url: string; method: string; auth: string | null; type: string | null; body: unknown }> = [];
-  const fetch = (async (url: string | URL, init?: RequestInit) => {
+  const fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
     calls.push({
       url: String(url),
@@ -22,7 +22,7 @@ function agent(status = 204) {
       body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
     });
     return new Response(null, { status });
-  }) as unknown as typeof globalThis.fetch;
+  };
   return { calls, client: createSuperdialAgentClient({ baseUrl: "http://agent.test", token: "loopback", fetch }) };
 }
 

@@ -29,9 +29,9 @@ describe("the call device store", () => {
     await dbCallDeviceStore.put(AGENT, { deviceId: "SUPERDIAL", accessToken: "syt_plain_call_token" });
     expect(await dbCallDeviceStore.get(AGENT)).toEqual({ deviceId: "SUPERDIAL", accessToken: "syt_plain_call_token" });
 
-    const rows = await rawSql`SELECT device_id, access_token_encrypted FROM superdial_call_devices WHERE agent_user_id = ${AGENT}`;
+    const rows = await rawSql<Array<{ device_id: string; access_token_encrypted: string }>>`SELECT device_id, access_token_encrypted FROM superdial_call_devices WHERE agent_user_id = ${AGENT}`;
     expect(rows).toHaveLength(1);
-    const [row] = rows as unknown as Array<{ device_id: string; access_token_encrypted: string }>;
+    const [row] = rows;
     expect(row?.device_id).toBe("SUPERDIAL");
     expect(String(row?.access_token_encrypted)).not.toContain("syt_plain_call_token");
     expect(String(row?.access_token_encrypted).length).toBeGreaterThan(0);
