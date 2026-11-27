@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.135 — 2026-11-27
+
 ### Upgrade notes
 
 - Migration 0141 (`superdial_call_devices`) runs when the hub deploys.
@@ -17,6 +19,10 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   DEPLOYMENT.md → superdial calls). A bridge room needs
   `scripts/superdial-call-power-levels.ts --apply --room <id>` once before a person can join a
   call in it.
+- Update the node binary on a station's node before installing agentpod-live there, then
+  `fleet bench stage set NAME --repin` for any bench stage on that node. A root-profile station
+  installs the plugin on its host with `apn hermes-live enable --profile default --apply` and a
+  gateway restart.
 
 ### Added
 
