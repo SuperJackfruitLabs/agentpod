@@ -222,6 +222,14 @@ export interface Attachment {
   /** The superdial turn ids this turn answers; empty for a turn no call started. */
   callTurns: string[];
   /**
+   * The prompt the session is running, as the events are fanned out (not as the chain below has
+   * handled them): set at `working`, cleared at `idle` or `ended`, with the spoken turns it
+   * answers. What a call's cancel is checked against: the cancel stops whatever the session runs
+   * now, so it may stop it only while that is still the turn it names. `callTurns` above runs
+   * behind it, and lags by however long the previous event takes.
+   */
+  runningPrompt: { callTurns: string[] } | null;
+  /**
    * The previous event's handling, which the next one waits for — see
    * `EVENT_ORDER_WAIT_MS`.
    */
@@ -365,6 +373,17 @@ export function takeTrigger(sessionId: string): NotedTrigger | undefined {
   return noted;
 }
 
+/**
+ * The spoken turns this session's prompt is answering now: the running prompt's, or, while none
+ * runs, the one noted and sent but not yet `working`. Empty once the turn ended, even while its
+ * reply is still on its way to the call, and for a typed turn that came after it.
+ */
+export function liveCallTurns(sessionId: string): readonly string[] {
+  const running = attached.get(sessionId)?.runningPrompt;
+  if (running) return running.callTurns;
+  return triggers.get(sessionId)?.callTurns ?? [];
+}
+
 /** Leak detection, mirroring `_subscriberCountForTest` in acp-sessions. */
 export function _attachedCountForTest(): number {
   return attached.size;
@@ -402,6 +421,7 @@ export function newAttachment(roomId: string, agentUser: string): Attachment {
     open: null,
     voiceTriggered: false,
     callTurns: [],
+    runningPrompt: null,
     chain: Promise.resolve(),
   };
 }

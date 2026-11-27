@@ -1432,6 +1432,39 @@ describe("a spoken turn", () => {
     expect(notes[0]?.opts).toEqual({ voice: false });
   });
 
+  test("one that lost the busy race is forgotten in its room, and noted again when it is sent", async () => {
+    // Noted before the prompt, refused SESSION_BUSY: left standing, its entry would let a cancel
+    // for it stop the turn that won the race.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: base, callTurns } = spokenDeps();
+    const forgotten: Array<{ roomId: string; turnIds: string[] }> = [];
+    let refuse = true;
+    const d = {
+      ...base,
+      acp: {
+        ...base.acp,
+        // The race is lost between the busy check and the prompt; the turn that won it is then over.
+        isBusy: () => false,
+        whenIdle: () => Promise.resolve("idle" as const),
+        promptSession: async (userId: string, sessionId: string, text: string) => {
+          if (refuse) {
+            refuse = false;
+            throw new Error(SESSION_BUSY_MESSAGE);
+          }
+          prompts.push({ userId, sessionId, text });
+        },
+      },
+      forgetCallTurns: (roomId: string, turnIds: string[]) => void forgotten.push({ roomId, turnIds }),
+    };
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID, audio_ms: 900 }), d);
+    await pollUntil(() => prompts.length === 1);
+    expect(forgotten).toEqual([{ roomId: ROOM, turnIds: [SPOKEN_TURN] }]);
+    expect(callTurns).toEqual([
+      { roomId: ROOM, turnIds: [SPOKEN_TURN] },
+      { roomId: ROOM, turnIds: [SPOKEN_TURN] },
+    ]);
+  });
+
   test("one that could not reach the agent is answered to the call as unanswered", async () => {
     await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     const { deps: d, unanswered } = spokenDeps();

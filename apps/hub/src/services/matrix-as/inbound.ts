@@ -243,6 +243,8 @@ export interface InboundDeps {
    * cancel names its room, and a turn id is only its own room's.
    */
   noteCallTurns?(roomId: string, sessionId: string, turnIds: string[]): void;
+  /** Spoken turns noted for a prompt that did not go out and will be sent again (a lost busy race). */
+  forgetCallTurns?(roomId: string, turnIds: string[]): void;
   /** Spoken turns (superdial) whose prompt could not reach the agent: the call is told so. */
   unansweredCallTurns?(roomId: string, turnIds: string[]): void;
 }
@@ -949,7 +951,12 @@ async function dispatchTurn(
     if (noted) deps.forgetTrigger?.(noted.sessionId, noted.eventId);
     // Lost the race between the check above and the prompt: another message
     // started a turn in between. Waiting is still the answer.
-    if (reason === SESSION_BUSY_MESSAGE) return "busy";
+    if (reason === SESSION_BUSY_MESSAGE) {
+      // Nor its spoken turns: a cancel for one must not find the turn that won the race. They
+      // are noted again when the prompt is sent again.
+      if (turn.callTurns) deps.forgetCallTurns?.(room.roomId, turn.callTurns);
+      return "busy";
+    }
     if (turn.callTurns) deps.unansweredCallTurns?.(room.roomId, turn.callTurns);
     // A remote bench stage holds the station: not a failure to reach it, and nothing to wait on.
     if (isStationInBench(err)) {

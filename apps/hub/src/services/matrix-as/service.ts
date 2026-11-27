@@ -76,7 +76,7 @@ import { resolveSpeechFor } from "../speech";
 import { synthesize } from "../speech";
 import { callsForBridge, type Calls } from "./calls";
 import { CALL_MEMBER_TYPE } from "./call-config";
-import { noteCallTurns } from "./call-turns";
+import { forgetCallTurns, noteCallTurns } from "./call-turns";
 import { createPowerLevelEnsurer } from "./call-power-levels";
 import type { CallTurnReply } from "./outbound-state";
 
@@ -795,7 +795,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }) =>
       noteTurnTrigger(sessionId, eventId, opts),
     ...(calls
-      ? { noteCallTurns: (roomId: string, sessionId: string, turnIds: string[]) => noteCallTurns(roomId, sessionId, turnIds) }
+      ? {
+          noteCallTurns: (roomId: string, sessionId: string, turnIds: string[]) => noteCallTurns(roomId, sessionId, turnIds),
+          forgetCallTurns: (roomId: string, turnIds: string[]) => forgetCallTurns(roomId, turnIds),
+        }
       : {}),
     forgetTrigger: forgetTurnTrigger,
     unansweredCallTurns: (roomId: string, turnIds: string[]) => void calls?.replyUnanswered(roomId, turnIds),

@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import type { AcpEvent } from "@agentpod/contract";
 import { CALL_MEMBER_TYPE, type SuperdialConfig } from "./call-config";
 import type { CallJoin, CallReply, ReplyResult, SuperdialAgentClient } from "./call-agent-client";
 import type { CallRoom } from "./call-members";
-import { resetCallTurnsForTest, noteCallTurns } from "./call-turns";
+import { callTurnSession, resetCallTurnsForTest, noteCallTurns } from "./call-turns";
 import { createCalls } from "./calls";
+import { attachRoomToSession, detachRoom, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 
 /**
  * The hub's calls, assembled: a person's membership becomes a join or a leave at superdial-agent,
@@ -31,12 +33,16 @@ function harness(
     reply?: ReplyResult;
     /** Each known session's room. */
     sessions?: Record<string, string>;
+    /** Use the outbound path's own record of the running prompt, not `running`. */
+    realLive?: boolean;
   } = {},
 ) {
   const joins: Array<{ roomId: string; body: CallJoin }> = [];
   const leaves: string[] = [];
   const replies: Array<{ roomId: string; turnId: string; body: CallReply }> = [];
   const cancels: Array<{ userId: string; sessionId: string }> = [];
+  /** Per session, the spoken turns its running prompt answers (as the outbound path records it). */
+  const running = new Map<string, string[]>();
   const agent: SuperdialAgentClient = {
     joinCall: async (roomId, body) => (joins.push({ roomId, body }), true),
     leaveCall: async (roomId) => (leaves.push(roomId), true),
@@ -56,11 +62,15 @@ function harness(
     },
     cancel: async (userId, sessionId) => void cancels.push({ userId, sessionId }),
     membershipOf: async () => "join",
+    ...(opts.realLive ? {} : { liveCallTurns: (sessionId: string) => running.get(sessionId) ?? [] }),
   });
-  return { calls, joins, leaves, replies, cancels };
+  return { calls, joins, leaves, replies, cancels, running };
 }
 
 beforeEach(() => resetCallTurnsForTest());
+
+/** Let the room's event chain run. */
+const settle = () => new Promise((r) => setTimeout(r, 5));
 
 describe("joining and leaving a call", () => {
   test("a person joining asks superdial-agent to join as the agent's call device", async () => {
@@ -116,15 +126,17 @@ describe("joining and leaving a call", () => {
 
 describe("a cancel from superdial-agent", () => {
   test("stops the turn it names, as the session's owner", async () => {
-    const { calls, cancels } = harness();
+    const { calls, cancels, running } = harness();
     noteCallTurns(ROOM, "acps_1", [TURN]);
+    running.set("acps_1", [TURN]);
     await calls.cancelTurn(TURN, ROOM);
     expect(cancels).toEqual([{ userId: "user_owner", sessionId: "acps_1" }]);
   });
 
   test("a turn in another room, or one the hub does not know, stops nothing", async () => {
-    const { calls, cancels } = harness();
+    const { calls, cancels, running } = harness();
     noteCallTurns(ROOM, "acps_1", [TURN]);
+    running.set("acps_1", [TURN]);
     await calls.cancelTurn(TURN, "!elsewhere:id.agentpod.dev");
     await calls.cancelTurn("6f1b2c3d-0000-4000-8000-000000000000", ROOM);
     expect(cancels).toEqual([]);
@@ -135,11 +147,13 @@ describe("a cancel from superdial-agent", () => {
     // the copy re-pointed the id at the second room's session: the real caller's hang-up then
     // named a room its turn was "not in", and stopped nothing.
     const OTHER = "!other:id.agentpod.dev";
-    const { calls, cancels } = harness({
+    const { calls, cancels, running } = harness({
       sessions: { acps_1: ROOM, acps_2: OTHER },
     });
     noteCallTurns(ROOM, "acps_1", [TURN]);
     noteCallTurns(OTHER, "acps_2", [TURN]);
+    running.set("acps_1", [TURN]);
+    running.set("acps_2", [TURN]);
     await calls.cancelTurn(TURN, ROOM);
     expect(cancels).toEqual([{ userId: "user_owner", sessionId: "acps_1" }]);
     expect(calls.cancelledByCaller(ROOM, [TURN])).toBe(true);
@@ -160,8 +174,9 @@ describe("a spoken turn's reply", () => {
   test("a turn the caller cancelled at hang-up gets no reply; an error turn is answered error", async () => {
     // The cancel came from superdial-agent as it left the call: there is no call to answer, and
     // E1 (2026-11-27) saw the reply answered 404.
-    const { calls, replies } = harness();
+    const { calls, replies, running } = harness();
     noteCallTurns(ROOM, "acps_1", ["t-cancelled", "t-error"]);
+    running.set("acps_1", ["t-cancelled"]);
     await calls.cancelTurn("t-cancelled", ROOM);
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-cancelled"], text: "Partial", errored: false });
     await calls.replyToCall({ roomId: ROOM, turnIds: ["t-error"], text: "", errored: true });
@@ -169,8 +184,9 @@ describe("a spoken turn's reply", () => {
   });
 
   test("whether the caller cancelled a turn is known until its end is handled, then forgotten", async () => {
-    const { calls } = harness();
+    const { calls, running } = harness();
     noteCallTurns(ROOM, "acps_1", ["t-1", "t-2"]);
+    running.set("acps_1", ["t-1", "t-2"]);
     expect(calls.cancelledByCaller(ROOM, ["t-1", "t-2"])).toBe(false);
     await calls.cancelTurn("t-2", ROOM);
     expect(calls.cancelledByCaller(ROOM, ["t-1", "t-2"])).toBe(true);
@@ -210,10 +226,120 @@ describe("a spoken turn's reply", () => {
   });
 
   test("once answered, a turn can no longer be cancelled", async () => {
-    const { calls, cancels } = harness();
+    const { calls, cancels, running } = harness();
     noteCallTurns(ROOM, "acps_1", [TURN]);
+    running.set("acps_1", [TURN]);
     await calls.replyToCall({ roomId: ROOM, turnIds: [TURN], text: "Done.", errored: false });
     await calls.cancelTurn(TURN, ROOM);
     expect(cancels).toEqual([]);
+  });
+});
+
+/**
+ * A cancel stops the session's prompt, whatever it is now: so it may stop one only while that prompt
+ * is still the spoken turn it names. The turn's entry outlives its prompt: its reply to the call is
+ * still being sent when the room's next message is prompted, and a prompt that lost the busy race
+ * was noted before it was refused.
+ */
+describe("a cancel for a spoken turn that is no longer running", () => {
+  const SESSION = "acps_1";
+  const TURN_A = "1a2b3c4d-0000-4000-8000-00000000000a";
+  const TURN_B = "1a2b3c4d-0000-4000-8000-00000000000b";
+
+  let listeners: Array<(e: AcpEvent) => void> = [];
+  const emit = (e: AcpEvent) => {
+    for (const l of listeners) l(e);
+  };
+  const state = (status: string, seq: number): AcpEvent => ({
+    sessionId: SESSION,
+    seq,
+    type: "state",
+    payload: { status },
+    createdAt: new Date().toISOString(),
+  });
+  /** The room's real outbound attachment, its call reply still in flight when asked to hold it. */
+  function attach(opts: { replyHangs?: boolean } = {}) {
+    attachRoomToSession(SESSION, ROOM, AGENT, {
+      client: { sendText: async () => "$evt", sendTyping: async () => {} },
+      subscribe: (_sessionId, fn) => {
+        listeners.push(fn);
+        return () => (listeners = listeners.filter((l) => l !== fn));
+      },
+      flushDelayMs: 0,
+      callReply: () => (opts.replyHangs ? new Promise<void>(() => {}) : Promise.resolve()),
+    });
+  }
+
+  beforeEach(() => {
+    listeners = [];
+    detachRoom(SESSION);
+  });
+  afterAll(() => detachRoom(SESSION));
+
+  test("turn A finished and is still being answered, typed B is running: A's cancel leaves B alone", async () => {
+    const { calls, cancels } = harness({ realLive: true });
+    attach({ replyHangs: true });
+    noteTurnTrigger(SESSION, "$a", { callTurns: [TURN_A] });
+    noteCallTurns(ROOM, SESSION, [TURN_A]);
+    emit(state("working", 1));
+    emit(state("idle", 2));
+    await settle();
+    // The room's next message, typed, is prompted while A's reply to the call is in flight.
+    noteTurnTrigger(SESSION, "$b");
+    emit(state("working", 3));
+    await settle();
+
+    await calls.cancelTurn(TURN_A, ROOM);
+    expect(cancels).toEqual([]);
+    // B is not ended as a hang-up either.
+    expect(calls.cancelledByCaller(ROOM, [TURN_A])).toBe(false);
+  });
+
+  test("a spoken turn that is the running prompt is still stopped", async () => {
+    const { calls, cancels } = harness({ realLive: true });
+    attach();
+    noteTurnTrigger(SESSION, "$b", { callTurns: [TURN_B] });
+    noteCallTurns(ROOM, SESSION, [TURN_B]);
+    emit(state("working", 1));
+    await settle();
+    await calls.cancelTurn(TURN_B, ROOM);
+    expect(cancels).toEqual([{ userId: "user_owner", sessionId: SESSION }]);
+  });
+
+  test("a spoken turn prompted but not yet working is stopped too", async () => {
+    // Between the prompt going out and the session saying `working`, the noted trigger is the
+    // prompt.
+    const { calls, cancels } = harness({ realLive: true });
+    attach();
+    noteTurnTrigger(SESSION, "$b", { callTurns: [TURN_B] });
+    noteCallTurns(ROOM, SESSION, [TURN_B]);
+    await calls.cancelTurn(TURN_B, ROOM);
+    expect(cancels).toEqual([{ userId: "user_owner", sessionId: SESSION }]);
+  });
+
+  test("a spoken turn that lost the busy race does not stop the typed turn that won it", async () => {
+    const { calls, cancels } = harness({ realLive: true });
+    attach();
+    noteTurnTrigger(SESSION, "$typed");
+    emit(state("working", 1));
+    await settle();
+    // Noted, then refused SESSION_BUSY: the inbound path takes the trigger back.
+    noteTurnTrigger(SESSION, "$spoken", { callTurns: [TURN_A] });
+    noteCallTurns(ROOM, SESSION, [TURN_A]);
+    forgetTurnTrigger(SESSION, "$spoken");
+    await calls.cancelTurn(TURN_A, ROOM);
+    expect(cancels).toEqual([]);
+  });
+
+  test("a turn's entry is gone before its reply to the call is sent", async () => {
+    // Forgotten only after the replies went out, a slow superdial-agent left the entry standing
+    // while the next prompt ran.
+    const { calls, replies } = harness();
+    noteCallTurns(ROOM, SESSION, [TURN_A]);
+    const replying = calls.replyToCall({ roomId: ROOM, turnIds: [TURN_A], text: "Done.", errored: false });
+    // The reply is still on its way to superdial-agent here.
+    expect(callTurnSession(ROOM, TURN_A)).toBeUndefined();
+    await replying;
+    expect(replies.map((r) => r.turnId)).toEqual([TURN_A]);
   });
 });

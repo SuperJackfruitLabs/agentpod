@@ -22,7 +22,7 @@ import { createSuperdialAgentClient, type SuperdialAgentClient } from "./call-ag
 import { createCallDeviceProvisioner, type CallDevice } from "./call-device";
 import { callRoomFor, createCallWatcher, type CallMemberEvent, type CallRoom } from "./call-members";
 import { callTurnOutcome, callTurnsCancelled, callTurnSession, forgetCallTurns, markCallTurnCancelled } from "./call-turns";
-import type { CallTurnReply } from "./outbound-state";
+import { liveCallTurns as outboundLiveCallTurns, type CallTurnReply } from "./outbound-state";
 import { checkCallMembership, createMembershipReader, type MembershipAnswer } from "./call-membership";
 
 const log = createLogger("matrix-calls");
@@ -44,6 +44,11 @@ export interface CallsDeps {
   cancel(userId: string, sessionId: string): Promise<void>;
   /** A person's membership of a room, read live from the homeserver as `asUser` (C4). */
   membershipOf(asUser: string, roomId: string, userId: string): Promise<string | null>;
+  /**
+   * The spoken turns a session's prompt answers now. Defaults to the room outbound path's record
+   * (`liveCallTurns`).
+   */
+  liveCallTurns?: (sessionId: string) => readonly string[];
 }
 
 export interface Calls {
@@ -84,6 +89,7 @@ async function sessionRow(sessionId: string): Promise<{ userId: string; roomId: 
 export function createCalls(deps: CallsDeps): Calls {
   const roomFor = deps.roomFor ?? ((roomId: string) => callRoomFor(roomId, deps.domain));
   const sessionFor = deps.sessionFor ?? sessionRow;
+  const liveCallTurns = deps.liveCallTurns ?? outboundLiveCallTurns;
 
   async function voiceFor(stationId: string): Promise<string> {
     try {
@@ -148,9 +154,11 @@ export function createCalls(deps: CallsDeps): Calls {
         forgetCallTurns(roomId, turnIds);
         return;
       }
-      for (const turnId of turnIds.slice(0, -1)) await close(roomId, turnId, "", "cancelled");
-      await close(roomId, last, text, callTurnOutcome(roomId, last, errored));
+      const outcome = callTurnOutcome(roomId, last, errored);
+      // Forgotten before the replies go out: the room's next prompt may run while they do.
       forgetCallTurns(roomId, turnIds);
+      for (const turnId of turnIds.slice(0, -1)) await close(roomId, turnId, "", "cancelled");
+      await close(roomId, last, text, outcome);
     },
 
     membership: (input) =>
@@ -161,8 +169,8 @@ export function createCalls(deps: CallsDeps): Calls {
       }),
 
     async replyUnanswered(roomId, turnIds) {
-      for (const turnId of turnIds) await close(roomId, turnId, "", "error");
       forgetCallTurns(roomId, turnIds);
+      for (const turnId of turnIds) await close(roomId, turnId, "", "error");
     },
 
     async cancelTurn(turnId, roomId) {
@@ -177,6 +185,17 @@ export function createCalls(deps: CallsDeps): Calls {
       // what superdial-agent was asked to join. A mismatch stops nothing.
       if (!session || session.roomId !== roomId) {
         log.warn("a cancel named a room its turn is not in; nothing was stopped", { turnId, roomId });
+        return;
+      }
+      // A cancel stops whatever the session is running now. A turn that ended (its reply to the call
+      // may still be on its way) or never started (it lost the busy race) is not that, and the
+      // room's next turn, typed or spoken, is not the caller's to stop.
+      if (!liveCallTurns(sessionId).includes(turnId)) {
+        log.info("a cancel for a spoken turn that is no longer running; nothing was stopped", {
+          turnId,
+          roomId,
+          sessionId,
+        });
         return;
       }
       markCallTurnCancelled(roomId, turnId);
