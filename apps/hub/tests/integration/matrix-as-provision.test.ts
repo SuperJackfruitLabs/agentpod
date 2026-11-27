@@ -643,3 +643,48 @@ describe("occupancy changes — a new occupant must actually get a room", () => 
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${successorRoom!.room_id}`;
   });
 });
+
+/**
+ * Members may publish call membership in a new agent room (superdial): `ensureCallPowerLevels`
+ * runs once, as the agent, for a bridge room provisioning just created — never for a room that
+ * already existed (the one-time script does those), nor for a harness room.
+ */
+function powerDeps() {
+  const ensured: Array<{ asUserId: string; roomId: string }> = [];
+  return {
+    ensured,
+    deps: { ...deps(), ensureCallPowerLevels: async (asUserId: string, roomId: string) => void ensured.push({ asUserId, roomId }) },
+  };
+}
+
+
+describe("call membership power levels on a new room", () => {
+  test("a new bridge room is given them, as its agent", async () => {
+    const { deps: d, ensured } = powerDeps();
+    await provisionStation(OPENCLAW, d);
+    const row = await roomRow(OPENCLAW);
+    expect(ensured).toEqual([{ asUserId: KRISHNA_MXID, roomId: row?.room_id }]);
+  });
+
+  test("an existing room is left to the one-time update", async () => {
+    await provisionStation(OPENCLAW, deps());
+    const { deps: d, ensured } = powerDeps();
+    await provisionStation(OPENCLAW, d);
+    expect(ensured).toEqual([]);
+  });
+
+  test("a harness room is not touched", async () => {
+    await rawSql`
+      UPDATE stations SET matrix_identity_mode = 'harness', matrix_id = '@analyst-echo:id.agentpod.dev'
+      WHERE id = ${HERMES}`;
+    const { deps: d, ensured } = powerDeps();
+    await provisionStation(HERMES, d);
+    expect(ensured).toEqual([]);
+  });
+
+  test("a failure costs the room nothing", async () => {
+    const d = { ...deps(), ensureCallPowerLevels: async () => { throw new Error("403 M_FORBIDDEN"); } };
+    await provisionStation(OPENCLAW, d);
+    expect(await roomRow(OPENCLAW)).not.toBeNull();
+  });
+});

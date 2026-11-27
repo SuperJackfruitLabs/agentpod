@@ -40,7 +40,15 @@ WeTextProcessing wheel) and one warm-up sentence. Previews are cached in
 
 ## API
 
-All but `/health` need `Authorization: Bearer $SPEECH_TOKEN`.
+All but `/health` need `Authorization: Bearer $SPEECH_TOKEN`, or one of the
+extra tokens.
+
+`SPEECH_TOKEN` is the hub's. Another client gets its own token rather than
+sharing that one: list them, comma-separated, in `SPEECH_EXTRA_TOKENS` in the
+same environment file (`SPEECH_EXTRA_TOKENS=<client a>,<client b>`) and
+restart. Any of the tokens is accepted, and the main one stays required. One
+token per additional client means a client's key can be rotated or revoked
+alone, by editing its entry, without touching the hub or the others.
 
 ```sh
 curl -s -H "Authorization: Bearer $SPEECH_TOKEN" -H 'Content-Type: application/json' \

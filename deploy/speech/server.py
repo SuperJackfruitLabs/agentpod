@@ -21,6 +21,8 @@ deploy/speech/BENCHMARK.md has the numbers):
 
 Configuration (environment):
   SPEECH_TOKEN       bearer token clients send; required
+  SPEECH_EXTRA_TOKENS  more accepted bearer tokens, comma-separated, one per
+                     additional client; optional
   SPEECH_HOST        address to listen on (a Tailscale address, never 0.0.0.0)
   SPEECH_PORT        default 8841
   SPEECH_MODEL       default kokoro-v1.0.onnx (relative to the working directory)
@@ -344,6 +346,7 @@ class SpeechRequest(BaseModel):
 def create_app(
     engine: Engine | None = None,
     token: str | None = None,
+    extra_tokens: list[str] | None = None,
     cache_dir: str | os.PathLike | None = None,
     queue_size: int | None = None,
     timeout: float | None = None,
@@ -361,6 +364,10 @@ def create_app(
     token = token if token is not None else env.get("SPEECH_TOKEN", "")
     if not token:
         raise RuntimeError("SPEECH_TOKEN is not set")
+    if extra_tokens is None:
+        extra_tokens = env.get("SPEECH_EXTRA_TOKENS", "").split(",")
+    # One per additional client, so each client's key is rotated or revoked alone.
+    tokens = [token] + [t.strip() for t in extra_tokens if t.strip()]
     cache = pathlib.Path(cache_dir if cache_dir is not None else env.get("SPEECH_CACHE_DIR", "cache"))
     queue = Queue(queue_size if queue_size is not None else int(env.get("SPEECH_QUEUE", "8")))
     timeout = timeout if timeout is not None else float(env.get("SPEECH_TIMEOUT", "120"))
@@ -393,8 +400,12 @@ def create_app(
         return JSONResponse(status_code=400, content={"detail": f"invalid request: {fields}"})
 
     def check_token(authorization: str | None = Header(None)) -> None:
-        expected = f"Bearer {token}"
-        if not authorization or not hmac.compare_digest(authorization, expected):
+        given = (authorization or "").encode()
+        # Compare against every token, so the time taken says nothing about which matched.
+        matched = False
+        for candidate in tokens:
+            matched |= hmac.compare_digest(given, f"Bearer {candidate}".encode())
+        if not authorization or not matched:
             raise HTTPException(status_code=401, detail="unauthorized")
 
     async def synthesise(sentences, parts, lang, speed, fmt, deadline, want_waveform=False):

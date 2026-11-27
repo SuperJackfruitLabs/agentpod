@@ -1363,3 +1363,103 @@ describe("permission.v2 answers in a station room", () => {
     expect(prompts.at(-1)?.text).toBe("what are you doing?");
   });
 });
+
+/**
+ * A spoken turn (superdial C3): SuperMessage posts what the person said in a call as their own
+ * message, marked `dev.superdial.spoken`. It goes to the agent like any message, prefixed so the
+ * agent answers briefly and speakably, and its trigger carries the turn id so the reply reaches
+ * the call. A marker for another agent is an ordinary message.
+ */
+const SPOKEN_AGENT_MXID = "@agent_mx-inbound-it-agent:id.agentpod.dev";
+const SPOKEN_TURN = "8d3b0a52-1c51-4c2b-9b55-2f1e0b4a6f10";
+
+function spoken(marker: Record<string, unknown>) {
+  const m = message(OWNER_MXID, "what time is it");
+  return { ...m, content: { ...m.content, "dev.superdial.spoken": marker } };
+}
+
+function spokenDeps() {
+  const notes: Array<{ eventId: string; opts: unknown }> = [];
+  const unanswered: Array<{ roomId: string; turnIds: string[] }> = [];
+  return {
+    notes,
+    unanswered,
+    deps: {
+      ...deps(),
+      noteTrigger: (_sessionId: string, eventId: string, opts?: unknown) => void notes.push({ eventId, opts }),
+      unansweredCallTurns: (roomId: string, turnIds: string[]) => void unanswered.push({ roomId, turnIds }),
+    },
+  };
+}
+
+describe("a spoken turn", () => {
+  test("is prompted with the call prefix, and its trigger carries the turn id", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notes } = spokenDeps();
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID, audio_ms: 2310 }), d);
+    expect(prompts.map((p) => p.text)).toEqual([
+      "[Spoken in a call, transcribed. Answer briefly, in plain sentences without markdown.] what time is it",
+    ]);
+    expect(notes).toHaveLength(1);
+    // Noted in the room it was spoken in: a cancel names its room, and a turn id is its room's.
+    expect(notes[0]?.opts).toEqual({ voice: false, callTurns: [SPOKEN_TURN], roomId: ROOM });
+  });
+
+  test("a marker whose turn id is not a lower-case UUIDv4 is an ordinary message", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notes } = spokenDeps();
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN.toUpperCase(), agent_user_id: SPOKEN_AGENT_MXID }), d);
+    expect(prompts.map((p) => p.text)).toEqual(["what time is it"]);
+    expect(notes[0]?.opts).toEqual({ voice: false });
+  });
+
+  test("a marker for another agent is an ordinary message: no prefix, no turn id", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notes } = spokenDeps();
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: "@agent_someone-else:id.agentpod.dev" }), d);
+    expect(prompts.map((p) => p.text)).toEqual(["what time is it"]);
+    expect(notes[0]?.opts).toEqual({ voice: false });
+  });
+
+  test("one that lost the busy race is forgotten in its room, and noted again when it is sent", async () => {
+    // Noted before the prompt, refused SESSION_BUSY: left standing, its entry would let a cancel
+    // for it stop the turn that won the race.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: base, notes } = spokenDeps();
+    const forgotten: unknown[] = [];
+    let refuse = true;
+    const d = {
+      ...base,
+      acp: {
+        ...base.acp,
+        // The race is lost between the busy check and the prompt; the turn that won it is then over.
+        isBusy: () => false,
+        whenIdle: () => Promise.resolve("idle" as const),
+        promptSession: async (userId: string, sessionId: string, text: string) => {
+          if (refuse) {
+            refuse = false;
+            throw new Error(SESSION_BUSY_MESSAGE);
+          }
+          prompts.push({ userId, sessionId, text });
+        },
+      },
+      forgetTrigger: (_s: string, _e: string, callTurns?: { roomId: string; turnIds: string[] }) =>
+        void forgotten.push(callTurns),
+    };
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID, audio_ms: 900 }), d);
+    await pollUntil(() => prompts.length === 1);
+    expect(forgotten).toEqual([{ roomId: ROOM, turnIds: [SPOKEN_TURN] }]);
+    expect(notes.map((n) => n.opts)).toEqual([
+      { voice: false, callTurns: [SPOKEN_TURN], roomId: ROOM },
+      { voice: false, callTurns: [SPOKEN_TURN], roomId: ROOM },
+    ]);
+  });
+
+  test("one that could not reach the agent is answered to the call as unanswered", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, unanswered } = spokenDeps();
+    createFails = new Error("node offline");
+    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID }), d);
+    expect(unanswered).toEqual([{ roomId: ROOM, turnIds: [SPOKEN_TURN] }]);
+  });
+});

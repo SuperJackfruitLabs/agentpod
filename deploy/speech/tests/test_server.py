@@ -79,6 +79,80 @@ def test_the_service_refuses_to_start_without_a_token(monkeypatch):
         server.create_app(engine=FakeEngine())
 
 
+def test_extra_tokens_do_not_replace_the_main_token(monkeypatch):
+    monkeypatch.delenv("SPEECH_TOKEN", raising=False)
+    monkeypatch.setenv("SPEECH_EXTRA_TOKENS", "client-a")
+    with pytest.raises(RuntimeError, match="SPEECH_TOKEN"):
+        server.create_app(engine=FakeEngine())
+
+
+def voices_status(app, header: str | None) -> int:
+    headers = {} if header is None else {"Authorization": header}
+    with TestClient(app) as c:
+        return c.get("/v1/voices", headers=headers).status_code
+
+
+@pytest.fixture
+def env_app(engine, tmp_path, monkeypatch):
+    """An app whose tokens come from the environment, as on foundry."""
+
+    def build(extra: str | None):
+        monkeypatch.setenv("SPEECH_TOKEN", TOKEN)
+        if extra is None:
+            monkeypatch.delenv("SPEECH_EXTRA_TOKENS", raising=False)
+        else:
+            monkeypatch.setenv("SPEECH_EXTRA_TOKENS", extra)
+        return server.create_app(engine=engine, cache_dir=tmp_path)
+
+    return build
+
+
+def test_main_token_is_accepted_beside_extra_tokens(env_app):
+    assert voices_status(env_app("client-a"), f"Bearer {TOKEN}") == 200
+
+
+def test_extra_tokens_are_accepted(env_app):
+    app = env_app("client-a,client-b")
+    assert voices_status(app, "Bearer client-a") == 200
+    assert voices_status(app, "Bearer client-b") == 200
+
+
+@pytest.mark.parametrize("header", [None, "Bearer wrong", "client-a", "Bearer ", f"Bearer {TOKEN},client-a"])
+def test_unknown_or_missing_tokens_are_refused(env_app, header):
+    assert voices_status(env_app("client-a"), header) == 401
+
+
+@pytest.mark.parametrize("extra", [None, "", " , ,"])
+def test_without_extra_tokens_only_the_main_token_works(env_app, extra):
+    app = env_app(extra)
+    assert voices_status(app, f"Bearer {TOKEN}") == 200
+    assert voices_status(app, "Bearer ") == 401
+    assert voices_status(app, "Bearer client-a") == 401
+
+
+def test_whitespace_and_empty_entries_are_ignored(env_app):
+    app = env_app(" client-a ,, \tclient-b\n, ")
+    assert voices_status(app, "Bearer client-a") == 200
+    assert voices_status(app, "Bearer client-b") == 200
+    assert voices_status(app, "Bearer  client-a ") == 401
+
+
+def test_extra_tokens_can_be_passed_directly(engine, tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECH_EXTRA_TOKENS", "from-env")
+    app = server.create_app(engine=engine, token=TOKEN, extra_tokens=["client-a"], cache_dir=tmp_path)
+    assert voices_status(app, "Bearer client-a") == 200
+    assert voices_status(app, "Bearer from-env") == 401
+
+
+def test_every_candidate_is_compared(env_app, monkeypatch):
+    app = env_app("client-a,client-b")
+    seen = []
+    real = server.hmac.compare_digest
+    monkeypatch.setattr(server.hmac, "compare_digest", lambda a, b: seen.append(b) or real(a, b))
+    assert voices_status(app, f"Bearer {TOKEN}") == 200
+    assert len(seen) == 3
+
+
 # --- formats ---------------------------------------------------------------------------
 
 

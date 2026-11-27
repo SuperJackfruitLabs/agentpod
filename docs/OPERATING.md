@@ -1582,6 +1582,77 @@ journalctl -u agentpod-hub -n 50 --no-pager | grep push-gateway
 
 ---
 
+### 7j. Calls with an agent (superdial)
+
+A person can call a **bridge-mode** agent from SuperMessage desktop. What they say is transcribed
+and posted as their own message, the agent answers it in the room's session like any message,
+and the reply is spoken back. The media and speech run in **superdial-agent**, a container from
+the `superdial` repository; the hub's part is everything that needs the agent's identity.
+Settings: [DEPLOYMENT.md → superdial calls](./DEPLOYMENT.md#superdial-calls).
+
+**The call device.** Each bridge agent gets a second Matrix device, `SUPERDIAL`, minted once by
+appservice login (which logs nothing out) the first time somebody calls it, and reused after
+that. Its access token is kept encrypted with `ENCRYPTION_KEY` in `superdial_call_devices`, and it
+is the only Matrix credential superdial-agent ever holds for an agent: it never sees the
+appservice token. The hub's own crypto device is untouched, and the hub reads only that device's
+one-time-key counts from a transaction. Deleting a row makes the next call mint the device again,
+which replaces its token.
+
+**Joining and leaving.** When a person publishes `org.matrix.msc3401.call.member` in a bridge
+agent's room, the hub asks superdial-agent to join (`PUT /v1/calls/{room_id}` on
+`SUPERDIAL_AGENT_URL`) with the call device's token, the station's voice (its speech settings'
+effective voice; `af_heart` if they cannot be read) and no fixed transcription language. When the
+last person's membership is emptied, it asks superdial-agent to leave (`DELETE`). Both are
+idempotent, so a hub restart in the middle of a call costs nothing. A call in a harness-mode
+agent's room is ignored here and refused by SuperExchange's token service.
+
+**Hanging up mid-turn.** superdial-agent stops the turn it was waiting for with
+`POST /internal/superdial/turns/{turn_id}/cancel` (bearer `SUPERDIAL_AGENT_TOKEN`, body
+`{"room_id"}`), which the hub maps to the session's `cancelTurn`; it answers `204` whether or not
+it was running that turn, and stops nothing for a turn in another room. A harness that ignores
+`session/cancel` keeps working and its answer still lands in the room, which is harmless.
+
+**The membership check.** Before SuperExchange's token service mints a LiveKit token it asks
+`POST /internal/superdial/membership` (bearer `SUPERDIAL_MEMBERSHIP_TOKEN`, body
+`{"user_id", "room_id"}`). The hub answers `{"allowed": true, "agent_user_id", "station_id"}` for
+someone joined to a bridge agent's room, read live from the homeserver as the agent, or
+`{"allowed": false, "reason"}` with `calls_disabled`, `not_agent_room`, `harness_mode` or
+`not_member`. A homeserver that cannot answer gets `503`, never an allow. superdial-agent asks
+for its own token the same way, as the agent, and is allowed because the agent is in its room.
+
+**Spoken turns.** A message with `dev.superdial.spoken` naming the room's own agent is prompted
+with `[Spoken in a call, transcribed. Answer briefly, in plain sentences without markdown.]` in
+front of the words. When the turn ends the room gets the answer as usual and superdial-agent gets
+the whole text once, with `outcome` `ok` or `error`; no voice note is posted for it. A turn the
+caller cancelled by hanging up ends silently: superdial-agent gets no reply (it has left the call),
+and the room gets no error or "ended without a reply" notice, only the 👀 taken off. A reply that
+superdial-agent answers `404` (the call ended first) is logged at debug and not retried. Messages that queued behind a turn and went to the agent together are
+answered once: the last spoken one gets the text and the earlier ones are closed `cancelled`. A
+typed message during a call is answered in the room only.
+
+**Room power levels.** A person can publish their call membership only if the room lets members
+send `org.matrix.msc3401.call.member` (and the newer `org.matrix.msc4143.rtc.member` and
+`org.matrix.msc4143.rtc.slot`) at power level 0. Provisioning sets this on every new bridge room.
+Existing rooms need it once, from the hub's directory on the host:
+
+```sh
+bun run scripts/superdial-call-power-levels.ts          # dry run: lists the rooms it would change
+bun run scripts/superdial-call-power-levels.ts --apply  # writes m.room.power_levels as each room's agent
+bun run scripts/superdial-call-power-levels.ts --room '!a:hs' --room '!b:hs'          # dry run, these rooms only
+bun run scripts/superdial-call-power-levels.ts --room '!a:hs' --room '!b:hs' --apply  # writes these rooms only
+```
+
+`--room <room_id>` is repeatable and limits the dry run and `--apply` alike to the rooms named.
+Quote room ids: they start with `!`. A named room that is not a bridge agent room is reported as
+`FAIL … not a bridge agent room` and left alone, and the run exits 1. Any other argument is
+refused (exit 2), so a mistyped option never widens a run to every room.
+
+It is idempotent, changes nothing else in the power levels, and is a real operation on the
+homeserver: run it inside an authorised session, after the dry run.
+
+The `/internal/superdial/*` routes are for machines on the same host or Docker network. Do not
+publish them on the hub's public hostname; their bearers are what hold if they are.
+
 ## 8. The superpipeline bridge
 
 The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It

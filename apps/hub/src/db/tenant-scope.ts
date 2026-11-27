@@ -87,6 +87,7 @@ import {
 } from "./schema/skills";
 import { tenants } from "./schema/tenants";
 import { superpipelineEventReceipts } from "./schema/event-receipts";
+import { superdialCallDevices } from "./schema/superdial";
 
 export { BOOTSTRAP_TENANT_ID } from "./schema/tenants";
 
@@ -266,6 +267,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "relay both deliver is acted on once. Like `matrix_as_transactions` it records envelopes, " +
       "not facts about a tenant: the id is the board's event sequence, and which tenant the event " +
       "belongs to is decided by the handler, after the claim. No route reads it.",
+  },
+
+  superdial_call_devices: {
+    table: superdialCallDevices,
+    reason:
+      "Each bridge agent's superdial call device, keyed by the agent's mxid — an identity of a " +
+      "principal, which the organization plane holds and which is not inside a fleet. Read only by " +
+      "the call path, for the agent of a room it already resolved through that room's station " +
+      "(itself tenant-scoped); no route reads or lists it.",
   },
 
   live_activity_tokens: {

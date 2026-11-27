@@ -8,7 +8,9 @@ import {
   feedAgents,
   noOlmRecipients,
   STALE_RETRY_COOLDOWN_MS,
+  type AgentCrypto,
   type CryptoRequest,
+  type CryptoTransaction,
   type ShareReport,
 } from "./crypto";
 
@@ -178,6 +180,21 @@ describe("agent crypto", () => {
   });
 });
 
+/** A crypto double that records everything each agent's machine was handed. */
+function fullSpy(loaded: string[] = []) {
+  const fed: Array<{ userId: string; tx: CryptoTransaction }> = [];
+  const crypto: AgentCrypto = {
+    receive: async (userId, tx) => void fed.push({ userId, tx }),
+    encrypt: async () => ({}),
+    decrypt: async () => null,
+    trackUsers: async () => {},
+    loadedAgents: () => loaded,
+    deviceIdFor: async () => "AGENTPOD",
+    close: async () => {},
+  };
+  return { fed, crypto };
+}
+
 describe("narrowing a transaction to the agents in it", () => {
   const isOurs = (u: string) => u.startsWith("@agent_");
 
@@ -196,7 +213,9 @@ describe("narrowing a transaction to the agents in it", () => {
         // No machine is loaded in these, so a device-list change wakes nobody extra
         // and each case still asserts exactly the narrowing it was written for.
         loadedAgents: () => [],
-        close: () => {},
+        // The hub's own device for every agent in these fixtures.
+        deviceIdFor: async () => "AGENTPOD",
+        close: async () => {},
       },
     };
   }
@@ -208,7 +227,7 @@ describe("narrowing a transaction to the agents in it", () => {
     // quietly unreachable.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [], left: [] },
@@ -232,7 +251,7 @@ describe("narrowing a transaction to the agents in it", () => {
     // device that is gone, and the recipient can read none of it.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [ALICE], left: [] },
@@ -250,7 +269,7 @@ describe("narrowing a transaction to the agents in it", () => {
   test("users outside our namespace are not fed", async () => {
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: ["@a-human:id.agentpod.dev"], left: [] },
@@ -262,10 +281,223 @@ describe("narrowing a transaction to the agents in it", () => {
     expect(fed).toHaveLength(0);
   });
 
-  test("fallback key types are merged across devices", async () => {
+  /**
+   * A bridge agent with a second device — its superdial call device, `SUPERDIAL` — gets both
+   * devices' counts in one transaction. The hub's machine is the `AGENTPOD`-named device only;
+   * the call device's counts are another client's business. Merged with last-one-wins, a call
+   * device reporting 50 would tell the hub its pool is full when it holds 3, and it would stop
+   * topping up until people could no longer start encrypted sessions with the agent.
+   */
+  for (const order of ["hub device first", "call device first"] as const) {
+    test(`a second device's counts never reach the hub's machine (${order})`, async () => {
+      const { fed, crypto } = spy();
+      const hub = { signed_curve25519: 3 };
+      const call = { signed_curve25519: 50 };
+      const otk = order === "hub device first" ? { AGENTPOD: hub, SUPERDIAL: call } : { SUPERDIAL: call, AGENTPOD: hub };
+      const fallback =
+        order === "hub device first"
+          ? { AGENTPOD: [] as string[], SUPERDIAL: ["signed_curve25519"] }
+          : { SUPERDIAL: ["signed_curve25519"], AGENTPOD: [] as string[] };
+      await feedAgents(
+        crypto,
+        {
+          toDevice: [],
+          deviceLists: { changed: [], left: [] },
+          otkCounts: { [ALICE]: otk },
+          unusedFallbackKeys: { [ALICE]: fallback },
+        },
+        isOurs,
+      );
+      expect(fed).toEqual([{ userId: ALICE, otk: { signed_curve25519: 3 }, fallback: [] }]);
+    });
+  }
+
+  test("an agent named only by its call device's counts is not fed them", async () => {
+    // The transaction says nothing about the hub's device: feeding the machine `{}` and `[]`
+    // would read as "the fallback key was used" and rotate it for nothing.
     const { fed, crypto } = spy();
     await feedAgents(
-      crypto as any,
+      crypto,
+      {
+        toDevice: [],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { SUPERDIAL: { signed_curve25519: 50 } } },
+        unusedFallbackKeys: { [ALICE]: { SUPERDIAL: ["signed_curve25519"] } },
+      },
+      isOurs,
+    );
+    expect(fed).toEqual([]);
+  });
+
+  const BOB_CALL = { type: "m.room.encrypted", sender: "@rakesh:id.agentpod.dev", to_user_id: BOB, to_device_id: "SUPERDIAL", content: { n: 1 } };
+  const BOB_HUB = { type: "m.room.encrypted", sender: "@rakesh:id.agentpod.dev", to_user_id: BOB, to_device_id: "AGENTPOD", content: { n: 2 } };
+  const ALICE_HUB = { type: "m.room.encrypted", sender: "@rakesh:id.agentpod.dev", to_user_id: ALICE, to_device_id: "AGENTPOD", content: { n: 3 } };
+  const BOB_ALL = { type: "m.room_key_request", sender: "@rakesh:id.agentpod.dev", to_user_id: BOB, to_device_id: "*", content: { n: 4 } };
+  const UNROUTED = { type: "m.room.encrypted", sender: "@rakesh:id.agentpod.dev", content: { n: 5 } };
+
+  /**
+   * The appservice is pushed every to-device message for every device in its namespace — the
+   * call device's too, with `to_device_id: "SUPERDIAL"` (probe, tuwunel 2.0.0). Those are Olm
+   * messages and call keys for superdial-agent's own Olm account; the hub's machine must never
+   * see them, nor another agent's.
+   */
+  test("each machine is handed only the to-device messages for its own device", async () => {
+    const { fed, crypto } = fullSpy();
+    await feedAgents(
+      crypto,
+      {
+        toDevice: [BOB_CALL, BOB_HUB, ALICE_HUB, BOB_ALL, UNROUTED],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { AGENTPOD: { signed_curve25519: 10 } }, [BOB]: { AGENTPOD: { signed_curve25519: 10 } } },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    const byUser = Object.fromEntries(fed.map((f) => [f.userId, f.tx.toDevice]));
+    expect(byUser[BOB]).toEqual([BOB_HUB, BOB_ALL, UNROUTED]);
+    expect(byUser[ALICE]).toEqual([ALICE_HUB, UNROUTED]);
+  });
+
+  test("a transaction carrying only the call device's traffic feeds the hub's machine nothing", async () => {
+    // The SUPERDIAL login itself arrives as `device_lists.changed: [the agent]`, beside the call
+    // device's to-device messages and its zero key counts.
+    const { fed, crypto } = fullSpy([BOB]);
+    await feedAgents(
+      crypto,
+      {
+        toDevice: [BOB_CALL],
+        deviceLists: { changed: [BOB], left: [] },
+        otkCounts: { [BOB]: { SUPERDIAL: { signed_curve25519: 0 } } },
+        unusedFallbackKeys: { [BOB]: { SUPERDIAL: [] } },
+      },
+      isOurs,
+    );
+    for (const { tx } of fed) {
+      expect(tx.toDevice).toEqual([]);
+      expect(tx.otkCounts).toEqual({});
+      // Its own device-list change is not news to its own machine: no re-query of itself, so it
+      // does not start sharing room keys with the call device.
+      expect(tx.deviceLists?.changed).not.toContain(BOB);
+      // An unreported fallback list must not read as "the fallback key was used" (a rotation
+      // and an upload for nothing).
+      expect(tx.unusedFallbackKeys).toEqual(["signed_curve25519"]);
+    }
+  });
+
+  /**
+   * MSC3202 reports key counts for a device when they change, not with every to-device message.
+   * A transaction carrying a room key for the hub's device beside counts for the call device only
+   * read as "not about the hub's device", and the room key was dropped: messages sent with it
+   * could never be read.
+   */
+  test("a to-device message for the hub's device is fed even when only the call device's counts came", async () => {
+    const { fed, crypto } = fullSpy();
+    await feedAgents(
+      crypto,
+      {
+        toDevice: [BOB_HUB, BOB_CALL],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [BOB]: { SUPERDIAL: { signed_curve25519: 50 } } },
+        unusedFallbackKeys: { [BOB]: { SUPERDIAL: [] } },
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => f.userId)).toEqual([BOB]);
+    const [bob] = fed;
+    expect(bob?.tx.toDevice).toEqual([BOB_HUB]);
+    // Still never the call device's counts, and a missing list is not "the fallback key was used".
+    expect(bob?.tx.otkCounts).toEqual({});
+    expect(bob?.tx.unusedFallbackKeys).toEqual(["signed_curve25519"]);
+  });
+
+  test("a to-device message for every device of an agent (`*`) is fed with no counts at all", async () => {
+    const { fed, crypto } = fullSpy();
+    await feedAgents(
+      crypto,
+      { toDevice: [BOB_ALL], deviceLists: { changed: [], left: [] }, otkCounts: {}, unusedFallbackKeys: {} },
+      isOurs,
+    );
+    expect(fed.map((f) => [f.userId, f.tx.toDevice])).toEqual([[BOB, [BOB_ALL]]]);
+  });
+
+  test("a to-device message for somebody outside our namespace, or for the call device alone, wakes nobody", async () => {
+    const { fed, crypto } = fullSpy();
+    const human = { ...BOB_HUB, to_user_id: "@rakesh:id.agentpod.dev" };
+    await feedAgents(
+      crypto,
+      { toDevice: [human, BOB_CALL, UNROUTED], deviceLists: { changed: [], left: [] }, otkCounts: {}, unusedFallbackKeys: {} },
+      isOurs,
+    );
+    expect(fed).toEqual([]);
+  });
+
+  /**
+   * One agent's device id that cannot be read (its store unreadable, its login refused) must not
+   * cost every other agent its share of the transaction: the route swallows the throw and the
+   * homeserver never sends those room keys again.
+   */
+  test("an agent whose device cannot be resolved is skipped, and the others are still fed", async () => {
+    const { fed, crypto } = fullSpy();
+    const failing: AgentCrypto = {
+      ...crypto,
+      deviceIdFor: async (userId) => {
+        if (userId === ALICE) throw new Error("login refused");
+        return "AGENTPOD";
+      },
+    };
+    await feedAgents(
+      failing,
+      {
+        toDevice: [ALICE_HUB, BOB_HUB],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { AGENTPOD: { signed_curve25519: 1 } }, [BOB]: { AGENTPOD: { signed_curve25519: 2 } } },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => [f.userId, f.tx.toDevice, f.tx.otkCounts])).toEqual([[BOB, [BOB_HUB], { signed_curve25519: 2 }]]);
+  });
+
+  test("an agent whose machine refuses its share is skipped, and the others are still fed", async () => {
+    const { fed, crypto } = fullSpy();
+    const failing: AgentCrypto = {
+      ...crypto,
+      receive: async (userId, tx) => {
+        if (userId === ALICE) throw new Error("store locked");
+        await crypto.receive(userId, tx);
+      },
+    };
+    await feedAgents(
+      failing,
+      {
+        toDevice: [ALICE_HUB, BOB_HUB],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: { [ALICE]: { AGENTPOD: { signed_curve25519: 1 } }, [BOB]: { AGENTPOD: { signed_curve25519: 2 } } },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => f.userId)).toEqual([BOB]);
+  });
+
+  test("an unreported fallback list repeats the last one the hub device reported", async () => {
+    const { fed, crypto } = fullSpy([ALICE]);
+    const quiet = { toDevice: [], deviceLists: { changed: ["@rakesh:id.agentpod.dev"], left: [] }, otkCounts: {}, unusedFallbackKeys: {} };
+    await feedAgents(
+      crypto,
+      { ...quiet, deviceLists: { changed: [], left: [] }, unusedFallbackKeys: { [ALICE]: { AGENTPOD: [] } } },
+      isOurs,
+    );
+    await feedAgents(crypto, quiet, isOurs);
+    expect(fed.map((f) => f.tx.unusedFallbackKeys)).toEqual([[], []]);
+    // Another agent's machine still hears of a human's device change.
+    expect(fed[1]?.tx.deviceLists?.changed).toEqual(["@rakesh:id.agentpod.dev"]);
+  });
+
+  test("fallback key types are read from the hub's own device", async () => {
+    const { fed, crypto } = spy();
+    await feedAgents(
+      crypto,
       {
         toDevice: [],
         deviceLists: { changed: [], left: [] },

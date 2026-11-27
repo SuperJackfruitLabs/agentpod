@@ -111,7 +111,8 @@ import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createBridgeRosterRoute } from './routes/bridge-roster.ts';
 import { createCapabilityCatalogRoute } from './routes/capability-catalog.ts';
-import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
+import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge, superdialConfig } from './services/matrix-as/index.ts';
+import { createSuperdialRoutes } from './routes/superdial.ts';
 import { onStationsAdopted, onProvisionStation } from './services/stations/index.ts';
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/index.ts';
 import { signalNodeToAdopt } from './services/matrix-as/index.ts';
@@ -587,6 +588,24 @@ if (matrixBridge) {
     createMissionRoutes({
       domain: matrixBridge.config.domain,
       client: matrixBridge.client,
+    }),
+  );
+}
+
+// ── superdial calls ──────────────────────────────────────────────────────────
+//
+// POST /internal/superdial/turns/:turnId/cancel — superdial-agent stopping a spoken turn the
+// caller hung up on (bearer SUPERDIAL_AGENT_TOKEN). Mounted whatever the bridge's state, so a hub
+// with calls off answers rather than 404s; each route refuses every caller while its token is
+// unset. Outside /api/* for the reason the appservice is: the callers are machines with secrets.
+{
+  const superdial = superdialConfig();
+  app.route(
+    '/internal/superdial',
+    createSuperdialRoutes({
+      agentToken: superdial.agentToken,
+      membershipToken: superdial.membershipToken,
+      calls: matrixBridge?.calls ?? null,
     }),
   );
 }

@@ -499,6 +499,47 @@ agents are refused either way. What each read answers is on the docs site:
 | `ROSTER_READERS` | `GET /api/bridge/boards/:boardId/roster`, `GET /api/bridge/stations/:id` and `GET /api/bridge/principals/:prn/boards`: the bridge roster, for a placement service and for Superlibrary |
 | `CATALOG_READERS` | `GET /api/catalog`, `GET /api/catalog/stations` and `GET /api/catalog/stations/:id`: what exists in the workspace and which station has it |
 
+### superdial calls
+
+Voice calls with bridge-mode agents. The call itself runs in **superdial-agent**, a separate
+container from the `superdial` repository that joins a call as the agent's second Matrix device;
+the hub notices the call, hands superdial-agent that device, and sends it each spoken turn's
+reply. Off unless both of the first two variables are set, and then nothing about calls runs:
+call memberships are ignored and the membership check answers `calls_disabled`. Day-2 operation:
+[OPERATING.md → 7j. Calls with an agent](./OPERATING.md#7j-calls-with-an-agent-superdial).
+
+| Variable | Meaning |
+|---|---|
+| `SUPERDIAL_AGENT_URL` | Where superdial-agent serves its call API, over loopback or the Docker network — never a public address. Trailing slashes are stripped. Unset: calls are off. |
+| `SUPERDIAL_AGENT_TOKEN` | The bearer both directions of the hub ↔ superdial-agent API carry; the same value is given to superdial-agent. Unset: calls are off. |
+| `SUPERDIAL_MEMBERSHIP_TOKEN` | The bearer SuperExchange's token service presents to the hub's membership check. Unset: every check is answered `401`, so the token service refuses every call. |
+
+Calls also need the Matrix bridge with crypto on (`ENABLE_MATRIX_BRIDGE=true`,
+`MATRIX_CRYPTO_STORE_DIR`), and migration `0141_superdial_call_devices`, which the hub applies at
+boot like every other.
+
+**superdial-agent, beside the hub.** The container is built from the `superdial` repository and
+deployed by estate; this repository holds no unit for it. What the hub expects of it:
+
+- It runs on the same host or Docker network as the hub and serves the call API on
+  `SUPERDIAL_AGENT_URL`: `PUT` and `DELETE /v1/calls/{room_id}`,
+  `POST /v1/calls/{room_id}/turns/{turn_id}/reply` and `GET /v1/health`, each behind
+  `Authorization: Bearer <SUPERDIAL_AGENT_TOKEN>`. Nothing about it is published publicly except
+  the media it sends through LiveKit.
+- It reaches the hub's `POST /internal/superdial/turns/{turn_id}/cancel` with the same bearer, so
+  it needs the hub's local address (not the public hostname).
+- It holds the same `SUPERDIAL_AGENT_TOKEN`, its own speech credential for the suite's speech
+  services, and nothing else of the hub's: the call device token for each agent arrives in each
+  `PUT /v1/calls/{room_id}`. It is never given `MATRIX_AS_TOKEN`.
+- It keeps a persistent crypto store per call device (one Olm account per agent's `SUPERDIAL`
+  device). Losing it means each call device must be minted again: delete the agent's row in
+  `superdial_call_devices` and the next call mints a fresh device.
+- It reaches the homeserver (the `homeserver_url` the hub sends) and SuperExchange's token service.
+
+SuperExchange's token service reaches the hub's `POST /internal/superdial/membership` with
+`SUPERDIAL_MEMBERSHIP_TOKEN`, over the same local path. Keep `/internal/*` off the public
+hostname where the proxy allows it; both routes refuse every caller without their bearer.
+
 ### Other settings
 
 | Variable | Meaning |

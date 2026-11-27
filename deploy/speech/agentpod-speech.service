@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/agentpod-speech
+# SPEECH_TOKEN, optional SPEECH_EXTRA_TOKENS, host and port (README).
 EnvironmentFile=/etc/agentpod-speech.env
 ExecStart=/opt/agentpod-speech/.venv/bin/uvicorn server:create_app --factory --host ${SPEECH_HOST} --port ${SPEECH_PORT}
 Restart=on-failure

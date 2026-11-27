@@ -81,6 +81,15 @@ export function attachRoomToSession(
       event.type === "state" && isRecord(event.payload) && event.payload.status === "working"
         ? takeTrigger(sessionId)
         : undefined;
+    const status = event.type === "state" && isRecord(event.payload) ? event.payload.status : undefined;
+    if (status === "working") {
+      // A `working` with no new trigger is the same prompt (after a permission pause), or one
+      // nobody noted; either way it answers no new spoken turn.
+      if (noted !== undefined) state.runningPrompt = { callTurns: [...(noted.callTurns ?? [])] };
+      else state.runningPrompt ??= { callTurns: [] };
+    } else if (status === "idle" || status === "ended") {
+      state.runningPrompt = null;
+    }
 
     const previous = state.chain;
     state.chain = (async () => {

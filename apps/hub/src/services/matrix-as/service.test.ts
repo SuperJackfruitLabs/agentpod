@@ -79,3 +79,54 @@ describe("the bridge switch", () => {
     expect(cfg.homeserverUrl).toBe("http://127.0.0.1:6167");
   });
 });
+
+describe("superdial calls", () => {
+  const keys = ["SUPERDIAL_AGENT_URL", "SUPERDIAL_AGENT_TOKEN", "SUPERDIAL_MEMBERSHIP_TOKEN"] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const restore = () => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  };
+
+  test("are off unless both the agent's URL and its token are set", async () => {
+    const { superdialConfig } = await import("./call-config");
+    expect(superdialConfig({}).enabled).toBe(false);
+    expect(superdialConfig({ SUPERDIAL_AGENT_URL: "http://127.0.0.1:8790" }).enabled).toBe(false);
+    expect(superdialConfig({ SUPERDIAL_AGENT_TOKEN: "t" }).enabled).toBe(false);
+    const on = superdialConfig({ SUPERDIAL_AGENT_URL: "http://127.0.0.1:8790/", SUPERDIAL_AGENT_TOKEN: " t " });
+    expect(on).toEqual({ agentUrl: "http://127.0.0.1:8790", agentToken: "t", membershipToken: "", enabled: true });
+  });
+
+  test("the bridge holds no calls when they are off, and holds them when they are on", () => {
+    try {
+      for (const k of keys) delete process.env[k];
+      expect(createMatrixBridge(matrixBridgeConfig(base))?.calls).toBeNull();
+      process.env.SUPERDIAL_AGENT_URL = "http://127.0.0.1:8790";
+      process.env.SUPERDIAL_AGENT_TOKEN = "loopback";
+      expect(createMatrixBridge(matrixBridgeConfig(base))?.calls?.config.enabled).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  /**
+   * Inert when off: a new bridge room's power levels are rewritten for call membership only when
+   * calls are on. It ran for every new room before, calls or none.
+   */
+  test("new rooms get call power levels only when calls are on", () => {
+    try {
+      for (const k of keys) delete process.env[k];
+      const off = createMatrixBridge(matrixBridgeConfig(base));
+      expect(off && "ensureCallPowerLevels" in off.provisionDeps).toBe(false);
+      process.env.SUPERDIAL_AGENT_URL = "http://127.0.0.1:8790";
+      process.env.SUPERDIAL_AGENT_TOKEN = "loopback";
+      const on = createMatrixBridge(matrixBridgeConfig(base));
+      expect(on && "ensureCallPowerLevels" in on.provisionDeps).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+});
+

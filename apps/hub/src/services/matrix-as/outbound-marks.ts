@@ -45,6 +45,14 @@ export async function mark(ctx: RoomContext, key: string): Promise<void> {
   if (key === REACTION.working) state.workingReactionId = id ?? null;
 }
 
+/** Take the working mark off the turn's message and put nothing in its place. */
+export async function unmark(ctx: RoomContext): Promise<void> {
+  const { roomId, agentUser, deps, state } = ctx;
+  if (!state.workingReactionId || !deps.client.redact) return;
+  await deps.client.redact(agentUser, roomId, state.workingReactionId).catch(() => {});
+  state.workingReactionId = null;
+}
+
 /** Post the held error as the turn's outcome: ❌ on the message and the notice. */
 export async function reportError(ctx: RoomContext): Promise<void> {
   const { state } = ctx;

@@ -13,10 +13,10 @@ import { PERMISSION_OUTCOME_TYPE, permissionV2Content, type HarnessPermission } 
 import { harnessPermission } from "./harness-permission";
 import { flush, scheduleFlush } from "./outbound-flush";
 import { log } from "./outbound-log";
-import { mark, reportError, startTyping, stopTyping } from "./outbound-marks";
+import { mark, reportError, startTyping, stopTyping, unmark } from "./outbound-marks";
 import { chunkTextOfKind, errorMessage, isRecord, messageChunkText, permissionRequest } from "./outbound-payloads";
 import { say } from "./outbound-send";
-import { detachEnded, REACTION, SILENT_TURN_NOTICE, type RoomContext } from "./outbound-state";
+import { detachEnded, REACTION, SILENT_TURN_NOTICE, type NotedTrigger, type RoomContext } from "./outbound-state";
 import { fleet, streamLive, streamThought, streamTool } from "./outbound-streams";
 import {
   clearPendingPermission,
@@ -31,7 +31,7 @@ import type { SpokenTurn } from "./voice-reply";
 export async function handleEvent(
   ctx: RoomContext,
   event: AcpEvent,
-  noted: { eventId: string; voice: boolean } | undefined
+  noted: NotedTrigger | undefined
 ): Promise<void> {
   if (ctx.state.ended) return;
   switch (event.type) {
@@ -114,7 +114,7 @@ function onAgentUpdate(ctx: RoomContext, event: AcpEvent): void {
 async function onState(
   ctx: RoomContext,
   event: AcpEvent,
-  noted: { eventId: string; voice: boolean } | undefined
+  noted: NotedTrigger | undefined
 ): Promise<void> {
   const { sessionId, roomId, state } = ctx;
   const status = isRecord(event.payload) ? event.payload.status : undefined;
@@ -146,7 +146,7 @@ async function onState(
   }
 }
 
-async function onWorking(ctx: RoomContext, noted: { eventId: string; voice: boolean } | undefined): Promise<void> {
+async function onWorking(ctx: RoomContext, noted: NotedTrigger | undefined): Promise<void> {
   const { roomId, state } = ctx;
   // Without this the room looks dead for the ten seconds an agent
   // spends thinking. The trigger is picked up here rather than at
@@ -158,6 +158,7 @@ async function onWorking(ctx: RoomContext, noted: { eventId: string; voice: bool
   if (noted !== undefined) {
     state.triggerEventId = noted.eventId;
     state.voiceTriggered = noted.voice;
+    state.callTurns = noted.callTurns ?? [];
   }
   state.inTurn = true;
   fleet(ctx, ({ name, mxid, at }) => ({ type: "turn-started", roomId, mxid, name, at }));
@@ -170,42 +171,60 @@ async function onTurnEnd(ctx: RoomContext, event: AcpEvent): Promise<void> {
   const { state } = ctx;
   const wasTurn = state.inTurn || state.produced;
   state.inTurn = false;
-  // An error nothing came after is the turn's outcome: report it now,
-  // as it used to be reported the moment it arrived.
-  if (state.pendingError !== null) await reportError(ctx);
-  // A turn that said nothing, ran nothing, and reported nothing is
-  // not a turn that worked. The hub cannot know *why* — the harness
-  // that failed did not say — but it can refuse to call silence
-  // success, and it can tell the reader that their question went
-  // unanswered rather than leaving them to infer it from a tick.
-  //
-  // Nothing is said when nobody asked: an unprompted turn (a cron
-  // job speaking) has no reader waiting and no message to mark.
-  //
-  // A session that ends mid-turn usually says why (the node went
-  // away, the harness exited), and that beats "its own logs will say".
-  // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
-  // hub marks its idle state `silent`) is done, not failed: no
-  // notice, and a ✅ on the message it answered by saying nothing.
   const choseSilence = isRecord(event.payload) && event.payload.silent === true;
-  if (wasTurn) noteTurnFinished(ctx, state.reportedError || (!state.produced && !choseSilence));
-  state.lastTurnCounts = null;
-  if (!state.produced && !state.reportedError && choseSilence) {
-    await mark(ctx, REACTION.done);
-  } else if (!state.produced && !state.reportedError) {
-    await mark(ctx, REACTION.failed);
-    if (state.triggerEventId) {
-      const reason = isRecord(event.payload) ? event.payload.reason : undefined;
-      await say(ctx,
-        typeof reason === "string" && reason.trim() !== ""
-          ? `This turn ended without a reply — ${reason.trim()}`
-          : SILENT_TURN_NOTICE
-      );
+  // The caller hung up while the agent worked, and superdial-agent cancelled the turn. Nobody is
+  // waiting for an answer and nothing failed, so the room is told nothing: an error the cancel
+  // caused ("stopped the turn") is dropped, there is no silence notice, and the 👀 comes off
+  // with no ✅ or ❌. Whatever the agent already said stays in the room.
+  const cancelledByCaller = state.callTurns.length > 0 && ctx.deps.callTurnCancelled?.(ctx.roomId, state.callTurns) === true;
+  if (cancelledByCaller) {
+    state.pendingError = null;
+    if (wasTurn) noteTurnFinished(ctx, false);
+    state.lastTurnCounts = null;
+    await unmark(ctx);
+  } else {
+    // An error nothing came after is the turn's outcome: report it now,
+    // as it used to be reported the moment it arrived.
+    if (state.pendingError !== null) await reportError(ctx);
+    // A turn that said nothing, ran nothing, and reported nothing is
+    // not a turn that worked. The hub cannot know *why* — the harness
+    // that failed did not say — but it can refuse to call silence
+    // success, and it can tell the reader that their question went
+    // unanswered rather than leaving them to infer it from a tick.
+    //
+    // Nothing is said when nobody asked: an unprompted turn (a cron
+    // job speaking) has no reader waiting and no message to mark.
+    //
+    // A session that ends mid-turn usually says why (the node went
+    // away, the harness exited), and that beats "its own logs will say".
+    // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
+    // hub marks its idle state `silent`) is done, not failed: no
+    // notice, and a ✅ on the message it answered by saying nothing.
+    if (wasTurn) noteTurnFinished(ctx, state.reportedError || (!state.produced && !choseSilence));
+    state.lastTurnCounts = null;
+    if (!state.produced && !state.reportedError && choseSilence) {
+      await mark(ctx, REACTION.done);
+    } else if (!state.produced && !state.reportedError) {
+      await mark(ctx, REACTION.failed);
+      if (state.triggerEventId) {
+        const reason = isRecord(event.payload) ? event.payload.reason : undefined;
+        await say(ctx,
+          typeof reason === "string" && reason.trim() !== ""
+            ? `This turn ended without a reply — ${reason.trim()}`
+            : SILENT_TURN_NOTICE
+        );
+      }
+    } else if (!state.reportedError) {
+      await mark(ctx, REACTION.done);
     }
-  } else if (!state.reportedError) {
-    await mark(ctx, REACTION.done);
   }
-  speakTurn(ctx);
+  // A turn a call started is answered to the call; any other may be spoken as a voice note.
+  if (state.callTurns.length > 0 && ctx.deps.callReply) {
+    replyToCall(ctx, state.reportedError || (!state.produced && !choseSilence));
+  } else {
+    speakTurn(ctx);
+  }
+  state.callTurns = [];
   state.turnText = [];
   state.turnTextEventId = null;
   state.open = null;
@@ -265,6 +284,23 @@ function speakTurn(ctx: RoomContext): void {
       });
     });
   }
+}
+
+/**
+ * A spoken turn's reply, to the call it came from — after the text is in the room, the way the
+ * voice reply is, and never awaited for the same reason. The whole text once (C6 v1); the call
+ * speaks it, so no voice-note reply is posted as well.
+ */
+function replyToCall(ctx: RoomContext, errored: boolean): void {
+  const { sessionId, roomId, deps, state } = ctx;
+  const reply = { roomId, turnIds: [...state.callTurns], text: state.turnText.join("\n\n"), errored };
+  void deps.callReply?.(reply).catch((err) => {
+    log.warn("a spoken turn's reply could not be sent to its call", {
+      sessionId,
+      roomId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }
 
 /** A question for the person in the room, answerable by its number. */

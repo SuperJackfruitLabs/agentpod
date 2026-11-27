@@ -91,6 +91,40 @@ export interface OutboundDeps {
    * Optional: without it replies are text only, as before.
    */
   speak?: (turn: SpokenTurn) => Promise<unknown>;
+  /**
+   * Hand a spoken turn's reply to the superdial call it came from (`calls.ts`), in place of the
+   * voice-note reply. Called — never awaited — once per turn that a call started, when it ends.
+   * `errored`: it ended in an error, or said nothing without choosing to. Optional: without it a
+   * spoken turn is answered like a typed one.
+   */
+  callReply?: (reply: CallTurnReply) => Promise<unknown>;
+  /**
+   * Did the caller cancel any of these spoken turns (a hang-up while the agent worked)? Such a
+   * turn ends silently in the room: no error, no "ended without a reply" notice, no ✅ or ❌ —
+   * only the 👀 taken off. Optional: without it every turn ends as before.
+   */
+  callTurnCancelled?: (roomId: string, turnIds: readonly string[]) => boolean;
+}
+
+/** A spoken turn's reply, for the call: every turn id it answers (several when merged). */
+export interface CallTurnReply {
+  roomId: string;
+  turnIds: string[];
+  text: string;
+  errored: boolean;
+}
+
+/** The message that started a turn, as noted before the prompt and taken on `working`. */
+export interface NotedTrigger {
+  eventId: string;
+  voice: boolean;
+  /** superdial turn ids, when the message was spoken in a call. */
+  callTurns?: string[];
+  /**
+   * The attachment's `runningPrompt` this trigger replaced: given back if the prompt never went
+   * out (`forgetTurnTrigger`), because then the earlier prompt is still the one running.
+   */
+  superseded?: { callTurns: string[] };
 }
 
 export interface Attachment {
@@ -190,6 +224,16 @@ export interface Attachment {
   open: { eventId: string; text: string } | null;
   /** Whether a voice note from the user started this turn. */
   voiceTriggered: boolean;
+  /** The superdial turn ids this turn answers; empty for a turn no call started. */
+  callTurns: string[];
+  /**
+   * The prompt the session is running, as the events are fanned out (not as the chain below has
+   * handled them): set at `working`, cleared at `idle` or `ended`, with the spoken turns it
+   * answers. What a call's cancel is checked against: the cancel stops whatever the session runs
+   * now, so it may stop it only while that is still the turn it names. `callTurns` above runs
+   * behind it, and lags by however long the previous event takes.
+   */
+  runningPrompt: { callTurns: string[] } | null;
   /**
    * The previous event's handling, which the next one waits for — see
    * `EVENT_ORDER_WAIT_MS`.
@@ -296,15 +340,30 @@ export const SILENT_TURN_NOTICE =
  * Set by the inbound path before it prompts. Kept outside the attachment because
  * a turn can be noted before the room is attached — and cleared with it.
  */
-const triggers = new Map<string, { eventId: string; voice: boolean }>();
+const triggers = new Map<string, NotedTrigger>();
 
 /**
  * Note which message started the next turn on this session, and whether it
  * was a voice note — a station set to answer voice with voice speaks only
  * those turns.
  */
-export function noteTurnTrigger(sessionId: string, eventId: string, opts: { voice?: boolean } = {}): void {
-  triggers.set(sessionId, { eventId, voice: opts.voice === true });
+export function noteTurnTrigger(
+  sessionId: string,
+  eventId: string,
+  opts: { voice?: boolean; callTurns?: string[] } = {},
+): void {
+  // A prompt only goes out once the session reads idle, but the last turn's `idle` event may
+  // not have fanned out yet (it waits behind its database insert), leaving `runningPrompt` on the
+  // turn that ended. From here the noted prompt is the one a cancel is checked against.
+  const attachment = attached.get(sessionId);
+  const superseded = attachment?.runningPrompt ?? undefined;
+  if (attachment) attachment.runningPrompt = null;
+  triggers.set(sessionId, {
+    eventId,
+    voice: opts.voice === true,
+    ...(opts.callTurns && opts.callTurns.length > 0 ? { callTurns: [...opts.callTurns] } : {}),
+    ...(superseded ? { superseded } : {}),
+  });
 }
 
 /**
@@ -313,17 +372,32 @@ export function noteTurnTrigger(sessionId: string, eventId: string, opts: { voic
  * Only that message's: one already taken, or replaced, is left alone.
  */
 export function forgetTurnTrigger(sessionId: string, eventId: string): void {
-  if (triggers.get(sessionId)?.eventId === eventId) triggers.delete(sessionId);
+  const noted = triggers.get(sessionId);
+  if (noted?.eventId !== eventId) return;
+  triggers.delete(sessionId);
+  const attachment = attached.get(sessionId);
+  if (noted.superseded && attachment && attachment.runningPrompt === null) attachment.runningPrompt = noted.superseded;
 }
 
 /**
  * Taken, not read: a trigger belongs to the one turn it started. Left in the
  * map, a later turn nobody asked for would mark it again.
  */
-export function takeTrigger(sessionId: string): { eventId: string; voice: boolean } | undefined {
+export function takeTrigger(sessionId: string): NotedTrigger | undefined {
   const noted = triggers.get(sessionId);
   triggers.delete(sessionId);
   return noted;
+}
+
+/**
+ * The spoken turns this session's prompt is answering now: the running prompt's, or, while none
+ * runs, the one noted and sent but not yet `working`. Empty once the turn ended, even while its
+ * reply is still on its way to the call, and for a typed turn that came after it.
+ */
+export function liveCallTurns(sessionId: string): readonly string[] {
+  const running = attached.get(sessionId)?.runningPrompt;
+  if (running) return running.callTurns;
+  return triggers.get(sessionId)?.callTurns ?? [];
 }
 
 /** Leak detection, mirroring `_subscriberCountForTest` in acp-sessions. */
@@ -362,6 +436,8 @@ export function newAttachment(roomId: string, agentUser: string): Attachment {
     turnTextEventId: null,
     open: null,
     voiceTriggered: false,
+    callTurns: [],
+    runningPrompt: null,
     chain: Promise.resolve(),
   };
 }

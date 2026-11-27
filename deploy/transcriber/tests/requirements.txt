@@ -1,0 +1,6 @@
+# The service's web stack, not faster-whisper: conftest stubs the model, so
+# these tests need no model download and no CTranslate2.
+fastapi==0.118.0
+python-multipart==0.0.20
+pytest==9.1.1
+httpx==0.28.1

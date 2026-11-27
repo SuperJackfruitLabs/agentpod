@@ -74,6 +74,11 @@ import { createVoiceReplier } from "./voice-reply";
 import { stationForRoom } from "./stations";
 import { resolveSpeechFor } from "../speech";
 import { synthesize } from "../speech";
+import { callsForBridge, type Calls } from "./calls";
+import { CALL_MEMBER_TYPE } from "./call-config";
+import { forgetCallTurns, noteCallTurns } from "./call-turns";
+import { createPowerLevelEnsurer } from "./call-power-levels";
+import type { CallTurnReply } from "./outbound-state";
 
 const log = createLogger("matrix-bridge");
 
@@ -194,7 +199,13 @@ export interface MatrixBridge {
   /** Give a station its identity and room. Safe to call repeatedly. */
   provision(stationId: string): Promise<void>;
   /** Handle one event the homeserver pushed. */
-  onEvent(event: { type: string; sender: string; room_id?: string; content?: Record<string, unknown> }): Promise<void>;
+  onEvent(event: {
+    type: string;
+    sender: string;
+    room_id?: string;
+    state_key?: string;
+    content?: Record<string, unknown>;
+  }): Promise<void>;
   /** Create the room behind an alias the homeserver asked about. */
   onProvisionAlias(alias: string): Promise<void>;
   /**
@@ -245,6 +256,8 @@ export interface MatrixBridge {
   onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
   /** Release native crypto machines before Bun tears down napi during shutdown. */
   close(): Promise<void>;
+  /** superdial calls (`calls.ts`), or null when they are off. */
+  calls: Calls | null;
 }
 
 /**
@@ -446,7 +459,18 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     return board?.speakerMxid ?? (await roomAgentUser(roomId, domain));
   };
 
-  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile, readPersona };
+  const calls = callsForBridge(cfg);
+  const ensurePowerLevels = createPowerLevelEnsurer({ homeserverUrl: cfg.homeserverUrl, asToken: cfg.asToken });
+  const provisionDeps = {
+    domain: cfg.domain,
+    client,
+    readWorkspaceFile,
+    readPersona,
+    // Only with calls on: off, a new room's power levels are what they always were.
+    ...(calls
+      ? { ensureCallPowerLevels: (asUserId: string, roomId: string) => ensurePowerLevels(asUserId, roomId) }
+      : {}),
+  };
 
   /**
    * Answering a gate, wired only when a board is configured.
@@ -762,9 +786,27 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
             settleFromSessionEvent(session, payload, { ...post, displayNameFor: (id) => principalLabel(id) }),
         },
         speak: voiceReplier.speakTurn,
+        // A turn spoken in a superdial call is answered to the call instead of by a voice note.
+        // One the caller cancelled at hang-up ends silently, with no reply to the call.
+        ...(calls
+          ? {
+              callReply: (reply: CallTurnReply) => calls.replyToCall(reply),
+              callTurnCancelled: (inRoom: string, turnIds: readonly string[]) => calls.cancelledByCaller(inRoom, turnIds),
+            }
+          : {}),
       }),
-    noteTrigger: noteTurnTrigger,
-    forgetTrigger: forgetTurnTrigger,
+    noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[]; roomId?: string }) => {
+      noteTurnTrigger(sessionId, eventId, opts);
+      // Spoken turns are noted in their room: a cancel names its room, and a turn id is its room's.
+      if (calls && opts?.roomId && opts.callTurns) noteCallTurns(opts.roomId, sessionId, opts.callTurns);
+    },
+    // A prompt that lost the busy race forgets its spoken turns too, until it is sent again: a
+    // cancel for one must not find the turn that won.
+    forgetTrigger: (sessionId: string, eventId: string, spoken?: { roomId: string; turnIds: string[] }) => {
+      forgetTurnTrigger(sessionId, eventId);
+      if (spoken) forgetCallTurns(spoken.roomId, spoken.turnIds);
+    },
+    unansweredCallTurns: (roomId: string, turnIds: string[]) => void calls?.replyUnanswered(roomId, turnIds),
     displayNameFor: (principalId: string) => principalLabel(principalId),
   };
 
@@ -782,6 +824,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     client: speakingClient,
     config: cfg,
     provisionDeps,
+    calls,
 
     expirePermissions: () =>
       expirePermissionsLogged({
@@ -909,6 +952,12 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     },
 
     async onEvent(event) {
+      // A call membership is state, never a message: `handleRoomMessage` would drop it unread.
+      // Only queued here: the join it causes is not waited for, so it never holds the transaction.
+      if (event.type === CALL_MEMBER_TYPE) {
+        await calls?.onCallMember(event);
+        return;
+      }
       await handleRoomMessage(event, inboundDeps);
     },
 

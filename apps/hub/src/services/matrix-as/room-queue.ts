@@ -23,6 +23,8 @@ export interface QueuedPrompt {
   eventId?: string;
   /** A voice note from the user — its answer may be spoken (`voice-reply.ts`). */
   voice?: boolean;
+  /** superdial turn ids this prompt answers (`call-turns.ts`): its reply goes to the call. */
+  callTurns?: string[];
 }
 
 /** What waiting for the agent came to. */
@@ -56,7 +58,15 @@ export function mergeQueued(items: QueuedPrompt[]): QueuedPrompt {
   const eventId = [...items].reverse().find((item) => item.eventId)?.eventId;
   // Any voice note among them makes the merged turn one the user spoke in.
   const voice = items.some((item) => item.voice === true);
-  return { text, images, ...(eventId ? { eventId } : {}), ...(voice ? { voice } : {}) };
+  // Every spoken turn among them, in order: each is owed an answer by the call.
+  const callTurns = items.flatMap((item) => item.callTurns ?? []);
+  return {
+    text,
+    images,
+    ...(eventId ? { eventId } : {}),
+    ...(voice ? { voice } : {}),
+    ...(callTurns.length > 0 ? { callTurns } : {}),
+  };
 }
 
 export class RoomQueue {

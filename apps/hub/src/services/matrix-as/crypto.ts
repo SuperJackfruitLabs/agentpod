@@ -280,6 +280,13 @@ export interface AgentCrypto {
    */
   loadedAgents(): string[];
   /**
+   * The device this hub's machine speaks as for an agent — the one `deps.deviceIdFor` issued.
+   *
+   * An agent can hold other devices (its superdial call device, `SUPERDIAL`), and a transaction
+   * reports key counts for every one of them; only this one's belong to this machine.
+   */
+  deviceIdFor(userId: string): Promise<string>;
+  /**
    * Close every machine. Awaited, because a machine left to the garbage
    * collector is dropped during process teardown and panics there.
    */
@@ -453,6 +460,10 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
 
     loadedAgents() {
       return [...machines.keys()];
+    },
+
+    deviceIdFor(userId) {
+      return deps.deviceIdFor(userId);
     },
 
     async trackUsers(userId, members) {
@@ -684,10 +695,18 @@ export type { RequestType };
  * mentioned only by a device-list change: a machine that is never told its
  * peer rotated a device keeps encrypting to a device that is gone.
  *
- * `toDevice` is passed to each of them whole. The events carry no routing of
- * their own in MSC3202, and olm ignores what is not addressed to it — so
- * handing every agent the full list is correct, if wasteful, where trying to
- * pre-sort it would risk dropping a key someone needed.
+ * **Each machine is handed only what is addressed to its own device.** An agent can hold more than
+ * one device — its superdial call device, `SUPERDIAL`, is the second — and the homeserver pushes
+ * the appservice everything for every one of them: to-device messages (routed by `to_user_id` /
+ * `to_device_id`), one-time-key counts and fallback types. The call device's Olm messages and
+ * call keys belong to superdial-agent's own Olm account, and its counts to its own key pool.
+ * A to-device event with no routing fields (an older homeserver) still goes to every machine, as
+ * it always did: olm ignores what is not addressed to it.
+ *
+ * Two more things a machine is not told, because both cost a key upload or a key share for
+ * nothing: its own user's device-list change (the call device's login is reported as one), and
+ * — when the transaction does not report it — "no unused fallback key", which an empty list would
+ * say. The last list the hub device reported stands in instead.
  */
 export async function feedAgents(
   crypto: AgentCrypto,
@@ -700,8 +719,52 @@ export async function feedAgents(
   isOurs: (userId: string) => boolean,
 ): Promise<void> {
   const agents = new Set<string>();
-  for (const user of Object.keys(tx.otkCounts)) if (isOurs(user)) agents.add(user);
-  for (const user of Object.keys(tx.unusedFallbackKeys)) if (isOurs(user)) agents.add(user);
+  /**
+   * Each agent's own device, the one its machine is: counts for any other device of the same
+   * agent are not this machine's. A bridge agent with a superdial call device (`SUPERDIAL`) has
+   * two, and the first version merged them with the last one winning — the call device's full
+   * pool could then stand in for an empty one here, and the hub would stop topping it up.
+   *
+   * Null for an agent whose device could not be read: that agent is skipped, and logged, and every
+   * other agent is still fed. One throw here used to lose the whole transaction's to-device
+   * messages for everybody (the route swallows it, and the homeserver never sends them again).
+   */
+  const own = new Map<string, string | null>();
+  const ownDevice = async (user: string): Promise<string | null> => {
+    if (own.has(user)) return own.get(user) ?? null;
+    let device: string | null = null;
+    try {
+      device = await crypto.deviceIdFor(user);
+    } catch (err) {
+      log.error("an agent's crypto device could not be read; its share of this transaction is skipped", {
+        agent: user,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    own.set(user, device);
+    return device;
+  };
+  for (const user of new Set([...Object.keys(tx.otkCounts), ...Object.keys(tx.unusedFallbackKeys)])) {
+    if (!isOurs(user)) continue;
+    const device = await ownDevice(user);
+    if (device === null) continue;
+    if (tx.otkCounts[user]?.[device] !== undefined || tx.unusedFallbackKeys[user]?.[device] !== undefined) {
+      agents.add(user);
+    }
+  }
+  /**
+   * And every agent a to-device message is addressed to, at its own device or `*`, counts or no
+   * counts: MSC3202 reports a device's counts when they change, not with every message. Gated on
+   * the counts alone, a room key for the hub's device that came beside the call device's counts
+   * was dropped, and the messages sent with it could never be read. Such an agent is fed no other
+   * device's counts below, and a missing fallback list stays "unreported".
+   */
+  for (const event of tx.toDevice) {
+    const toUser = recipientOf(event);
+    if (toUser === null || agents.has(toUser) || !isOurs(toUser)) continue;
+    const device = await ownDevice(toUser);
+    if (device !== null && addressedTo(event, toUser, device)) agents.add(toUser);
+  }
   for (const user of tx.deviceLists.changed) if (isOurs(user)) agents.add(user);
 
   /**
@@ -723,25 +786,63 @@ export async function feedAgents(
    */
   if (tx.deviceLists.changed.length > 0) for (const user of crypto.loadedAgents()) agents.add(user);
 
+  const remembered = lastFallbackKeys(crypto);
   for (const userId of agents) {
-    // Flattened per device, then merged: MSC3202 reports counts per device,
-    // and this agent has exactly one — `AGENTPOD`, asserted rather than
-    // generated. Merging rather than indexing by that name means a device id
-    // changing here does not silently stop the counts arriving.
-    const otk: Record<string, number> = {};
-    for (const perDevice of Object.values(tx.otkCounts[userId] ?? {})) {
-      for (const [algorithm, count] of Object.entries(perDevice)) otk[algorithm] = count;
-    }
-    const fallback = new Set<string>();
-    for (const list of Object.values(tx.unusedFallbackKeys[userId] ?? {})) {
-      for (const algorithm of list) fallback.add(algorithm);
-    }
+    // MSC3202 reports counts per device; only the hub's own device's are read.
+    const device = await ownDevice(userId);
+    if (device === null) continue;
+    const otk: Record<string, number> = { ...tx.otkCounts[userId]?.[device] };
+    const reported = tx.unusedFallbackKeys[userId]?.[device];
+    if (reported) remembered.set(userId, [...reported]);
+    const fallback = reported ?? remembered.get(userId) ?? ["signed_curve25519"];
 
-    await crypto.receive(userId, {
-      toDevice: tx.toDevice,
-      deviceLists: tx.deviceLists,
-      otkCounts: otk,
-      unusedFallbackKeys: [...fallback],
-    });
+    // Each agent on its own: one machine that refuses its share does not cost the rest theirs.
+    try {
+      await crypto.receive(userId, {
+        toDevice: tx.toDevice.filter((event) => addressedTo(event, userId, device)),
+        deviceLists: {
+          changed: tx.deviceLists.changed.filter((u) => u !== userId),
+          left: tx.deviceLists.left.filter((u) => u !== userId),
+        },
+        otkCounts: otk,
+        unusedFallbackKeys: [...new Set(fallback)],
+      });
+    } catch (err) {
+      log.error("an agent's machine could not take its share of a transaction", {
+        agent: userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
+}
+
+/** The last unused-fallback list each agent's own device reported, per crypto instance. */
+const fallbackMemory = new WeakMap<AgentCrypto, Map<string, string[]>>();
+function lastFallbackKeys(crypto: AgentCrypto): Map<string, string[]> {
+  let memory = fallbackMemory.get(crypto);
+  if (!memory) {
+    memory = new Map();
+    fallbackMemory.set(crypto, memory);
+  }
+  return memory;
+}
+
+/** The user a pushed to-device event is routed to (MSC2409 `to_user_id`), or null. */
+function recipientOf(event: unknown): string | null {
+  if (event === null || typeof event !== "object") return null;
+  const toUser: unknown = Reflect.get(event, "to_user_id");
+  return typeof toUser === "string" ? toUser : null;
+}
+
+/**
+ * Whether a pushed to-device event is for this agent's own device: MSC2409 routes it with
+ * `to_user_id` and `to_device_id` (`*` is every device). An event without them is kept.
+ */
+function addressedTo(event: unknown, userId: string, deviceId: string): boolean {
+  if (event === null || typeof event !== "object") return true;
+  const toUser: unknown = Reflect.get(event, "to_user_id");
+  const toDevice: unknown = Reflect.get(event, "to_device_id");
+  if (typeof toUser === "string" && toUser !== userId) return false;
+  if (typeof toDevice === "string" && toDevice !== "*" && toDevice !== deviceId) return false;
+  return true;
 }
