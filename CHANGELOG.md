@@ -14,8 +14,9 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 - Migration 0141 (`superdial_call_devices`) runs when the hub deploys.
 - Calls stay off until `SUPERDIAL_AGENT_URL` and `SUPERDIAL_AGENT_TOKEN` are set (see
-  DEPLOYMENT.md → superdial calls). Existing bridge rooms need
-  `scripts/superdial-call-power-levels.ts --apply` once before a person can join a call in them.
+  DEPLOYMENT.md → superdial calls). A bridge room needs
+  `scripts/superdial-call-power-levels.ts --apply --room <id>` once before a person can join a
+  call in it.
 
 ### Added
 
@@ -24,12 +25,27 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   the agent's `SUPERDIAL` call device, minted once by appservice login and kept encrypted; it
   answers SuperExchange's `POST /internal/superdial/membership`, takes superdial-agent's
   `POST /internal/superdial/turns/{turn_id}/cancel`, and sends each spoken turn's reply to the
-  call instead of a voice note. New bridge rooms let members publish call membership.
+  call instead of a voice note. With calls on, new bridge rooms let members publish call
+  membership.
 
 ### Fixed
 
 - An agent's crypto machine is fed only its own device's one-time-key counts, fallback key types
   and to-device messages; a second device of the same agent no longer overwrites them.
+- The Hermes version probe reads an editable git install's release from the tag
+  its checkout sits on (the checkout `direct_url.json` names, HEAD exactly on a
+  release tag, tracked files unchanged). Hermes's git installer leaves package
+  metadata saying `0.0.0`, so `apn hermes-live` and the Console's plugin panel
+  refused agentpod-live on every such station. A checkout between tags or with
+  local changes still reads `0.0.0` and is refused.
+- `apn hermes-live --profile default` is the Hermes root profile, `~/.hermes`,
+  whose gateway is `hermes-gateway.service`, as Hermes itself names it. It looked
+  for `~/.hermes/profiles/default`, which Hermes never creates.
+
+### Changed
+
+- agentpod-live is installable on Hermes up to 0.23.4 (was 0.21.5); the plugin's
+  contract passes on v0.23.4 and v0.23.1.
 
 ## v0.1.134 — 2026-11-26
 

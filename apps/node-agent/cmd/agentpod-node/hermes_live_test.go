@@ -106,3 +106,38 @@ func TestHermesLiveRejectsAProfileThatIsNotOne(t *testing.T) {
 		}
 	}
 }
+
+// Hermes reserves "default" for its root profile, ~/.hermes, which is where a
+// station on a host's own Hermes lives. It is never profiles/default.
+func TestHermesLiveDefaultIsTheRootProfile(t *testing.T) {
+	fakeHermes(t, testedHermes())
+	home := t.TempDir()
+	root := filepath.Join(home, ".hermes")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(config, []byte("model: fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	code, out, errOut := runHermesLive(t, "enable", "--profile", "default", "--apply")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(out, "systemctl --user restart hermes-gateway.service") {
+		t.Errorf("names the wrong gateway unit:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugins", hermeslive.Name, "plugin.yaml")); err != nil {
+		t.Fatalf("plugin not installed in the root profile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "profiles")); !os.IsNotExist(err) {
+		t.Fatal("wrote under profiles/")
+	}
+	if code, _, errOut := runHermesLive(t, "disable", "--profile", "default", "--apply"); code != 0 {
+		t.Fatalf("disable: %s", errOut)
+	}
+	if data, _ := os.ReadFile(config); string(data) != "model: fixture\n" {
+		t.Fatalf("disable did not restore the config:\n%s", data)
+	}
+}

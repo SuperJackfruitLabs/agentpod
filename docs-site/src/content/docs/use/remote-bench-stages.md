@@ -34,18 +34,18 @@ Switching a stage to `remote` clears its worker and worker arguments. Switching 
   refuses with `plugin_missing` without it. While a station is attached, the plugin rewrites
   replace-mode `patch` calls to V4A patches and adds a short note to the system prompt, because
   Hermes builds a replace-mode edit's approval diff from a file on its own machine.
-  - For a station with a **named** profile (`~/.hermes/profiles/NAME`) on a Hermes inside the
-    plugin's tested range, install it with `apn hermes-live enable --profile NAME --apply`, then
-    restart the gateway.
-  - The Console's plugin panel is the other route. It needs `"pluginManagement": true` in the node's
-    configuration, and a principal that may change the station. It goes through the same Hermes
-    version check as `apn hermes-live`.
-  - That check refuses a Hermes outside the plugin's tested range (today, newer than 0.21.5, so
-    0.23.x is refused). It also refuses a Hermes installed from a git checkout in editable mode,
-    which reports its version as `0.0.0`.
-  - **Not built yet:** `apn hermes-live` only handles named profiles. A station whose profile is the
-    Hermes root (`~/.hermes`) has no supported install path today, and neither does a Hermes the
-    version check refuses.
+  - **On the node**, as the node's user: `apn hermes-live enable --profile NAME --apply`, then
+    restart the station's gateway. `default` is the Hermes root profile (`~/.hermes`, gateway
+    `hermes-gateway.service`); any other name is `~/.hermes/profiles/NAME`.
+  - **Through the fleet**: `fleet plugins plan --station STATION --action enable`, then `fleet
+    plugins apply` with the plan's digest, then restart the station. The Console's plugin panel does
+    the same. Both need `apn plugin-management enable && apn restart` on the station's node, and a
+    caller whose grant may change what agents reach (otherwise 403, "You do not have permission to
+    change this agent").
+  - Both refuse a Hermes outside the plugin's tested range, today 0.21.3 to 0.23.4.
+  - A Hermes installed from a git checkout in editable mode reports its version as `0.0.0`. It is
+    judged by the release tag the checkout sits on. A checkout between tags, or one with changed
+    tracked files, keeps `0.0.0` and is refused.
 - **No credential files.** Hermes copies a profile's credential files to the remote side, and its
   own deny-list does not cover the profile's configuration list. An attach therefore refuses with
   `credential_files` when:
