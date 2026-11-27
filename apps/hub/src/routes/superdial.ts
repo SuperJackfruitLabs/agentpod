@@ -12,6 +12,7 @@
  * is what holds if it is.
  */
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { Calls } from "../services/matrix-as";
 import { createLogger } from "../utils/logger";
@@ -27,12 +28,18 @@ export interface SuperdialRouteDeps {
   calls: Pick<Calls, "cancelTurn" | "membership"> | null;
 }
 
-/** Constant-time over equal lengths, so a token cannot be found a character at a time. */
+/**
+ * Constant time whatever the lengths: both sides are hashed to 32 bytes and those compared, so a
+ * token can be found neither a character at a time nor by its length. An empty (unset) token
+ * matches nothing.
+ */
 function tokenMatches(expected: string, presented: string): boolean {
-  if (expected.length === 0 || expected.length !== presented.length) return false;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ presented.charCodeAt(i);
-  return diff === 0;
+  if (expected.length === 0) return false;
+  return timingSafeEqual(sha256(expected), sha256(presented));
+}
+
+function sha256(value: string): Buffer {
+  return createHash("sha256").update(value, "utf8").digest();
 }
 
 function bearer(header: string | undefined): string {

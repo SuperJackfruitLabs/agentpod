@@ -56,6 +56,16 @@ describe("POST /internal/superdial/turns/{turn_id}/cancel", () => {
   test("an unconfigured token refuses everyone, even an empty bearer", async () => {
     const { app: a } = app({ agentToken: "" });
     expect((await cancel(a, { room_id: ROOM }, "Bearer ")).status).toBe(401);
+    expect((await cancel(a, { room_id: ROOM }, "Bearer loopback-secret")).status).toBe(401);
+  });
+
+  test("a bearer of another length (a prefix, the token and more, another alphabet) is 401", async () => {
+    // Compared as SHA-256 digests in constant time, so a wrong length is not answered faster.
+    const { app: a, cancels } = app();
+    for (const auth of ["Bearer loopback-secre", "Bearer loopback-secretX", "Bearer loopback-sécret", "Bearer  loopback-secret"]) {
+      expect((await cancel(a, { room_id: ROOM }, auth)).status).toBe(401);
+    }
+    expect(cancels).toEqual([]);
   });
 
   test("a body without a room is 400", async () => {
