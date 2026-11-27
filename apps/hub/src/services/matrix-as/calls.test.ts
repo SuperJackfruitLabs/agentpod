@@ -379,6 +379,39 @@ describe("a cancel for a spoken turn that is no longer running", () => {
     expect(cancels).toEqual([]);
   });
 
+  test("a new prompt noted before the last one's idle fans out: the old turn's cancel stops nothing, the new one's does", async () => {
+    // The in-memory status said idle, so the next prompt went out while the old turn's `idle`
+    // event still waited behind its database insert: `runningPrompt` still named the old turn.
+    const { calls, cancels } = harness({ realLive: true });
+    attach();
+    noteTurnTrigger(SESSION, "$a", { callTurns: [TURN_A] });
+    noteCallTurns(ROOM, SESSION, [TURN_A]);
+    emit(state("working", 1));
+    await settle();
+    noteTurnTrigger(SESSION, "$b", { callTurns: [TURN_B] });
+    noteCallTurns(ROOM, SESSION, [TURN_B]);
+
+    await calls.cancelTurn(TURN_A, ROOM);
+    expect(cancels).toEqual([]);
+    await calls.cancelTurn(TURN_B, ROOM);
+    expect(cancels).toEqual([{ userId: "user_owner", sessionId: SESSION }]);
+  });
+
+  test("a spoken turn that is running stays cancellable after another prompt lost the busy race", async () => {
+    const { calls, cancels } = harness({ realLive: true });
+    attach();
+    noteTurnTrigger(SESSION, "$a", { callTurns: [TURN_A] });
+    noteCallTurns(ROOM, SESSION, [TURN_A]);
+    emit(state("working", 1));
+    await settle();
+    // Noted, then refused SESSION_BUSY: A is still the running prompt.
+    noteTurnTrigger(SESSION, "$typed");
+    forgetTurnTrigger(SESSION, "$typed");
+
+    await calls.cancelTurn(TURN_A, ROOM);
+    expect(cancels).toEqual([{ userId: "user_owner", sessionId: SESSION }]);
+  });
+
   test("a turn's entry is gone before its reply to the call is sent", async () => {
     // Forgotten only after the replies went out, a slow superdial-agent left the entry standing
     // while the next prompt ran.

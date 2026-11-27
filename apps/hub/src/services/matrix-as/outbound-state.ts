@@ -120,6 +120,11 @@ export interface NotedTrigger {
   voice: boolean;
   /** superdial turn ids, when the message was spoken in a call. */
   callTurns?: string[];
+  /**
+   * The attachment's `runningPrompt` this trigger replaced: given back if the prompt never went
+   * out (`forgetTurnTrigger`), because then the earlier prompt is still the one running.
+   */
+  superseded?: { callTurns: string[] };
 }
 
 export interface Attachment {
@@ -347,10 +352,17 @@ export function noteTurnTrigger(
   eventId: string,
   opts: { voice?: boolean; callTurns?: string[] } = {},
 ): void {
+  // A prompt only goes out once the session reads idle, but the last turn's `idle` event may
+  // not have fanned out yet (it waits behind its database insert), leaving `runningPrompt` on the
+  // turn that ended. From here the noted prompt is the one a cancel is checked against.
+  const attachment = attached.get(sessionId);
+  const superseded = attachment?.runningPrompt ?? undefined;
+  if (attachment) attachment.runningPrompt = null;
   triggers.set(sessionId, {
     eventId,
     voice: opts.voice === true,
     ...(opts.callTurns && opts.callTurns.length > 0 ? { callTurns: [...opts.callTurns] } : {}),
+    ...(superseded ? { superseded } : {}),
   });
 }
 
@@ -360,7 +372,11 @@ export function noteTurnTrigger(
  * Only that message's: one already taken, or replaced, is left alone.
  */
 export function forgetTurnTrigger(sessionId: string, eventId: string): void {
-  if (triggers.get(sessionId)?.eventId === eventId) triggers.delete(sessionId);
+  const noted = triggers.get(sessionId);
+  if (noted?.eventId !== eventId) return;
+  triggers.delete(sessionId);
+  const attachment = attached.get(sessionId);
+  if (noted.superseded && attachment && attachment.runningPrompt === null) attachment.runningPrompt = noted.superseded;
 }
 
 /**
