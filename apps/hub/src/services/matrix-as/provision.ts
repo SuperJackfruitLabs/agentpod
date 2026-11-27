@@ -78,7 +78,7 @@ export interface ProvisionDeps {
   ): Promise<{ bytes: Uint8Array; contentType: string } | null>;
   /**
    * Let the room's members publish call membership (`call-power-levels.ts`), as the agent. Run
-   * for a bridge room just created; never fails provisioning.
+   * for a bridge room just created; never fails provisioning. Absent when calls are off.
    */
   ensureCallPowerLevels?(asUserId: string, roomId: string): Promise<unknown>;
 }

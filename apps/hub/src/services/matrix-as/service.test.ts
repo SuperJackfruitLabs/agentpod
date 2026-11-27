@@ -110,4 +110,23 @@ describe("superdial calls", () => {
       restore();
     }
   });
+
+  /**
+   * Inert when off: a new bridge room's power levels are rewritten for call membership only when
+   * calls are on. It ran for every new room before, calls or none.
+   */
+  test("new rooms get call power levels only when calls are on", () => {
+    try {
+      for (const k of keys) delete process.env[k];
+      const off = createMatrixBridge(matrixBridgeConfig(base));
+      expect(off && "ensureCallPowerLevels" in off.provisionDeps).toBe(false);
+      process.env.SUPERDIAL_AGENT_URL = "http://127.0.0.1:8790";
+      process.env.SUPERDIAL_AGENT_TOKEN = "loopback";
+      const on = createMatrixBridge(matrixBridgeConfig(base));
+      expect(on && "ensureCallPowerLevels" in on.provisionDeps).toBe(true);
+    } finally {
+      restore();
+    }
+  });
 });
+

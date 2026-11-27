@@ -459,15 +459,18 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     return board?.speakerMxid ?? (await roomAgentUser(roomId, domain));
   };
 
+  const calls = callsForBridge(cfg);
   const ensurePowerLevels = createPowerLevelEnsurer({ homeserverUrl: cfg.homeserverUrl, asToken: cfg.asToken });
   const provisionDeps = {
     domain: cfg.domain,
     client,
     readWorkspaceFile,
     readPersona,
-    ensureCallPowerLevels: (asUserId: string, roomId: string) => ensurePowerLevels(asUserId, roomId),
+    // Only with calls on: off, a new room's power levels are what they always were.
+    ...(calls
+      ? { ensureCallPowerLevels: (asUserId: string, roomId: string) => ensurePowerLevels(asUserId, roomId) }
+      : {}),
   };
-  const calls = callsForBridge(cfg);
 
   /**
    * Answering a gate, wired only when a board is configured.
