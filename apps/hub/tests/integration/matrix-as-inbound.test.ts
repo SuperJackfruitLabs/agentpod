@@ -1380,16 +1380,13 @@ function spoken(marker: Record<string, unknown>) {
 
 function spokenDeps() {
   const notes: Array<{ eventId: string; opts: unknown }> = [];
-  const callTurns: Array<{ roomId: string; turnIds: string[] }> = [];
   const unanswered: Array<{ roomId: string; turnIds: string[] }> = [];
   return {
     notes,
-    callTurns,
     unanswered,
     deps: {
       ...deps(),
       noteTrigger: (_sessionId: string, eventId: string, opts?: unknown) => void notes.push({ eventId, opts }),
-      noteCallTurns: (roomId: string, _sessionId: string, turnIds: string[]) => void callTurns.push({ roomId, turnIds }),
       unansweredCallTurns: (roomId: string, turnIds: string[]) => void unanswered.push({ roomId, turnIds }),
     },
   };
@@ -1404,24 +1401,16 @@ describe("a spoken turn", () => {
       "[Spoken in a call, transcribed. Answer briefly, in plain sentences without markdown.] what time is it",
     ]);
     expect(notes).toHaveLength(1);
-    expect(notes[0]?.opts).toEqual({ voice: false, callTurns: [SPOKEN_TURN] });
-  });
-
-  test("its turn id is noted in the room it was spoken in", async () => {
-    // A cancel names its room, and a turn id is only its own room's.
-    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
-    const { deps: d, callTurns } = spokenDeps();
-    await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID, audio_ms: 2310 }), d);
-    expect(callTurns).toEqual([{ roomId: ROOM, turnIds: [SPOKEN_TURN] }]);
+    // Noted in the room it was spoken in: a cancel names its room, and a turn id is its room's.
+    expect(notes[0]?.opts).toEqual({ voice: false, callTurns: [SPOKEN_TURN], roomId: ROOM });
   });
 
   test("a marker whose turn id is not a lower-case UUIDv4 is an ordinary message", async () => {
     await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
-    const { deps: d, notes, callTurns } = spokenDeps();
+    const { deps: d, notes } = spokenDeps();
     await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN.toUpperCase(), agent_user_id: SPOKEN_AGENT_MXID }), d);
     expect(prompts.map((p) => p.text)).toEqual(["what time is it"]);
     expect(notes[0]?.opts).toEqual({ voice: false });
-    expect(callTurns).toEqual([]);
   });
 
   test("a marker for another agent is an ordinary message: no prefix, no turn id", async () => {
@@ -1436,8 +1425,8 @@ describe("a spoken turn", () => {
     // Noted before the prompt, refused SESSION_BUSY: left standing, its entry would let a cancel
     // for it stop the turn that won the race.
     await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
-    const { deps: base, callTurns } = spokenDeps();
-    const forgotten: Array<{ roomId: string; turnIds: string[] }> = [];
+    const { deps: base, notes } = spokenDeps();
+    const forgotten: unknown[] = [];
     let refuse = true;
     const d = {
       ...base,
@@ -1454,14 +1443,15 @@ describe("a spoken turn", () => {
           prompts.push({ userId, sessionId, text });
         },
       },
-      forgetCallTurns: (roomId: string, turnIds: string[]) => void forgotten.push({ roomId, turnIds }),
+      forgetTrigger: (_s: string, _e: string, callTurns?: { roomId: string; turnIds: string[] }) =>
+        void forgotten.push(callTurns),
     };
     await handleRoomMessage(spoken({ turn_id: SPOKEN_TURN, agent_user_id: SPOKEN_AGENT_MXID, audio_ms: 900 }), d);
     await pollUntil(() => prompts.length === 1);
     expect(forgotten).toEqual([{ roomId: ROOM, turnIds: [SPOKEN_TURN] }]);
-    expect(callTurns).toEqual([
-      { roomId: ROOM, turnIds: [SPOKEN_TURN] },
-      { roomId: ROOM, turnIds: [SPOKEN_TURN] },
+    expect(notes.map((n) => n.opts)).toEqual([
+      { voice: false, callTurns: [SPOKEN_TURN], roomId: ROOM },
+      { voice: false, callTurns: [SPOKEN_TURN], roomId: ROOM },
     ]);
   });
 

@@ -795,15 +795,17 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
             }
           : {}),
       }),
-    noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }) =>
-      noteTurnTrigger(sessionId, eventId, opts),
-    ...(calls
-      ? {
-          noteCallTurns: (roomId: string, sessionId: string, turnIds: string[]) => noteCallTurns(roomId, sessionId, turnIds),
-          forgetCallTurns: (roomId: string, turnIds: string[]) => forgetCallTurns(roomId, turnIds),
-        }
-      : {}),
-    forgetTrigger: forgetTurnTrigger,
+    noteTrigger: (sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[]; roomId?: string }) => {
+      noteTurnTrigger(sessionId, eventId, opts);
+      // Spoken turns are noted in their room: a cancel names its room, and a turn id is its room's.
+      if (calls && opts?.roomId && opts.callTurns) noteCallTurns(opts.roomId, sessionId, opts.callTurns);
+    },
+    // A prompt that lost the busy race forgets its spoken turns too, until it is sent again: a
+    // cancel for one must not find the turn that won.
+    forgetTrigger: (sessionId: string, eventId: string, spoken?: { roomId: string; turnIds: string[] }) => {
+      forgetTurnTrigger(sessionId, eventId);
+      if (spoken) forgetCallTurns(spoken.roomId, spoken.turnIds);
+    },
     unansweredCallTurns: (roomId: string, turnIds: string[]) => void calls?.replyUnanswered(roomId, turnIds),
     displayNameFor: (principalId: string) => principalLabel(principalId),
   };

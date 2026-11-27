@@ -232,19 +232,12 @@ export interface InboundDeps {
    * Which message started the turn about to run, so the agent can mark it —
    * 👀 while working, ✅ when done. Absent for a turn nobody asked for.
    */
-  noteTrigger?(sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[] }): void;
+  noteTrigger?(sessionId: string, eventId: string, opts?: { voice?: boolean; callTurns?: string[]; roomId?: string }): void;
   /**
-   * Take back a noted trigger whose prompt did not go out, so the next turn —
-   * somebody else's — does not claim this message's marks and voice flag.
+   * Take back a noted trigger (and its spoken turns) whose prompt did not go out, so the next turn
+   * — somebody else's — does not claim this message's marks and voice flag, nor a caller's cancel.
    */
-  forgetTrigger?(sessionId: string, eventId: string): void;
-  /**
-   * Spoken turns (superdial) about to be prompted into this session, noted in their room: a
-   * cancel names its room, and a turn id is only its own room's.
-   */
-  noteCallTurns?(roomId: string, sessionId: string, turnIds: string[]): void;
-  /** Spoken turns noted for a prompt that did not go out and will be sent again (a lost busy race). */
-  forgetCallTurns?(roomId: string, turnIds: string[]): void;
+  forgetTrigger?(sessionId: string, eventId: string, spoken?: { roomId: string; turnIds: string[] }): void;
   /** Spoken turns (superdial) whose prompt could not reach the agent: the call is told so. */
   unansweredCallTurns?(roomId: string, turnIds: string[]): void;
 }
@@ -934,11 +927,10 @@ async function dispatchTurn(
     // a stream nobody is listening to.
     deps.attach(sessionId, room.roomId, agentUser);
     if (turn.eventId && deps.noteTrigger) {
-      const callTurns = turn.callTurns ? { callTurns: turn.callTurns } : {};
+      const callTurns = turn.callTurns ? { callTurns: turn.callTurns, roomId: room.roomId } : {};
       deps.noteTrigger(sessionId, turn.eventId, { voice: turn.voice === true, ...callTurns });
       noted = { sessionId, eventId: turn.eventId };
     }
-    if (turn.callTurns) deps.noteCallTurns?.(room.roomId, sessionId, turn.callTurns);
 
     // The prompt as built above, unchanged here. The owner again, not the principal:
     // `promptSession` resolves the live session with `requireLive(userId, sessionId)`, and a
@@ -948,15 +940,10 @@ async function dispatchTurn(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     // This prompt did not start a turn, so its trigger must not wait for one.
-    if (noted) deps.forgetTrigger?.(noted.sessionId, noted.eventId);
+    if (noted) deps.forgetTrigger?.(noted.sessionId, noted.eventId, turn.callTurns && { roomId: room.roomId, turnIds: turn.callTurns });
     // Lost the race between the check above and the prompt: another message
     // started a turn in between. Waiting is still the answer.
-    if (reason === SESSION_BUSY_MESSAGE) {
-      // Nor its spoken turns: a cancel for one must not find the turn that won the race. They
-      // are noted again when the prompt is sent again.
-      if (turn.callTurns) deps.forgetCallTurns?.(room.roomId, turn.callTurns);
-      return "busy";
-    }
+    if (reason === SESSION_BUSY_MESSAGE) return "busy";
     if (turn.callTurns) deps.unansweredCallTurns?.(room.roomId, turn.callTurns);
     // A remote bench stage holds the station: not a failure to reach it, and nothing to wait on.
     if (isStationInBench(err)) {
